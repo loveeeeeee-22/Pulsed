@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  /* config options here */
-};
+  // Allow dev HMR when opening the app from another device on your LAN (see terminal Network URL).
+  // Add your machine’s LAN IP if Next warns about blocked cross-origin dev resources.
+  allowedDevOrigins: ['192.168.0.150'],
+}
 
-export default nextConfig;
+export default nextConfig

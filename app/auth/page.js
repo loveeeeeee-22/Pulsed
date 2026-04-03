@@ -1,0 +1,261 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { Country, City } from 'country-state-city'
+import { supabase } from '@/lib/supabase'
+
+export default function AuthPage() {
+  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://app.pulsed.com'
+  const [mode, setMode] = useState('signup')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+
+  // Signup-only profile fields (stored into user metadata, then copied into `profiles` by DB trigger).
+  const [username, setUsername] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [countryCode, setCountryCode] = useState('')
+  const [city, setCity] = useState('')
+
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState({ type: '', text: '' })
+
+  // Allow landing page links like `/auth?mode=login` or `/auth?mode=signup`.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const modeParam = params.get('mode')
+    if (modeParam === 'login') setMode('login')
+    if (modeParam === 'signup') setMode('signup')
+    if (params.get('verified') === '1') {
+      setMessage({ type: 'success', text: 'Email confirmed. Log in with your email and password.' })
+    }
+  }, [])
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setLoading(true)
+    setMessage({ type: '', text: '' })
+
+    if (mode === 'signup') {
+      if (password !== confirmPassword) {
+        setMessage({ type: 'error', text: 'Passwords do not match.' })
+        setLoading(false)
+        return
+      }
+      if (!username.trim()) {
+        setMessage({ type: 'error', text: 'Please choose a username.' })
+        setLoading(false)
+        return
+      }
+      if (!firstName.trim() || !lastName.trim()) {
+        setMessage({ type: 'error', text: 'Please enter your first and last name.' })
+        setLoading(false)
+        return
+      }
+
+      const redirectTo = `${APP_URL}/auth/confirm`
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: redirectTo,
+          data: {
+            username: username.trim(),
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            phone: phone.trim() || null,
+            country_code: countryCode || null,
+            city: city.trim() || null,
+          },
+        },
+      })
+      if (error) {
+        setMessage({ type: 'error', text: error.message })
+        setLoading(false)
+        return
+      }
+      setMessage({ type: 'success', text: 'Account created. Check your email for verification, then log in.' })
+      setMode('login')
+      setPassword('')
+      setConfirmPassword('')
+      setLoading(false)
+      return
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      setMessage({ type: 'error', text: error.message })
+      setLoading(false)
+      return
+    }
+
+    setLoading(false)
+    window.location.replace(`${APP_URL}/`)
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--page-bg)', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+      <div style={{ width: '100%', maxWidth: '420px', border: '1px solid var(--border)', borderRadius: '14px', background: 'var(--card-bg)', padding: '20px' }}>
+        <div style={{ marginBottom: '14px' }}>
+          <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            Pulsed
+          </div>
+          <h1 style={{ marginTop: '6px', fontSize: '28px' }}>{mode === 'signup' ? 'Sign Up' : 'Log In'}</h1>
+          <p style={{ marginTop: '6px', fontSize: '13px', color: 'var(--text3)' }}>
+            {mode === 'signup' ? 'Create your account to start journaling trades.' : 'Welcome back. Enter your credentials.'}
+          </p>
+        </div>
+
+        {message.text && (
+          <div
+            style={{
+              marginBottom: '12px',
+              borderRadius: '8px',
+              border: message.type === 'error' ? '1px solid rgba(239,68,68,0.45)' : '1px solid rgba(34,197,94,0.45)',
+              background: message.type === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+              color: message.type === 'error' ? '#fca5a5' : '#86efac',
+              padding: '10px 12px',
+              fontSize: '12px',
+              fontFamily: 'monospace',
+            }}
+          >
+            {message.text}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '10px' }}>
+          <div>
+            <label style={labelStyle}>Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              required
+            />
+          </div>
+
+          {mode === 'signup' ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={labelStyle}>First name</label>
+                  <input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="Love" required />
+                </div>
+                <div>
+                  <label style={labelStyle}>Last name</label>
+                  <input value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Trades" required />
+                </div>
+              </div>
+
+              <div>
+                <label style={labelStyle}>Username</label>
+                <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Shown on your dashboard" required />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={labelStyle}>Phone number</label>
+                  <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 123 4567" />
+                </div>
+                <div>
+                  <label style={labelStyle}>Country</label>
+                  <select value={countryCode} onChange={e => { setCountryCode(e.target.value); setCity('') }} style={{ width: '100%' }}>
+                    <option value="">Select country…</option>
+                    {Country.getAllCountries()
+                      .slice()
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map(c => (
+                        <option key={c.isoCode} value={c.isoCode}>
+                          {c.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label style={labelStyle}>City</label>
+                <select
+                  value={city}
+                  onChange={e => setCity(e.target.value)}
+                  style={{ width: '100%' }}
+                  disabled={!countryCode}
+                >
+                  <option value="">{countryCode ? 'Select city…' : 'Select country first…'}</option>
+                  {countryCode
+                    ? (City.getCitiesOfCountry(countryCode) || [])
+                        .slice()
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .map(c => (
+                          <option key={`${c.name}-${c.stateCode || ''}`} value={c.name}>
+                            {c.name}
+                          </option>
+                        ))
+                    : null}
+                </select>
+              </div>
+            </>
+          ) : null}
+
+          <div>
+            <label style={labelStyle}>{mode === 'signup' ? 'Create password' : 'Password'}</label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="At least 6 characters"
+              minLength={6}
+              required
+            />
+          </div>
+
+          {mode === 'signup' ? (
+            <div>
+              <label style={labelStyle}>Confirm password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                placeholder="Re-type your password"
+                minLength={6}
+                required
+              />
+            </div>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{ marginTop: '4px', border: 'none', borderRadius: '8px', background: 'var(--accent)', color: '#fff', fontFamily: 'monospace', fontSize: '13px', padding: '10px 12px', cursor: 'pointer', opacity: loading ? 0.7 : 1 }}
+          >
+            {loading ? 'Please wait...' : mode === 'signup' ? 'Create Account' : 'Log In'}
+          </button>
+        </form>
+
+        <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text3)', fontFamily: 'monospace' }}>
+          {mode === 'signup' ? 'Already have an account?' : "Don't have an account?"}{' '}
+          <button
+            type="button"
+            onClick={() => setMode(prev => (prev === 'signup' ? 'login' : 'signup'))}
+            style={{ border: 'none', background: 'none', color: 'var(--accent)', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: 0 }}
+          >
+            {mode === 'signup' ? 'Log in' : 'Sign up'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const labelStyle = {
+  display: 'block',
+  marginBottom: '6px',
+  fontSize: '11px',
+  fontFamily: 'monospace',
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  color: 'var(--text3)',
+}

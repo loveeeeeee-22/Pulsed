@@ -1,7 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { getAccountsForUser } from "@/lib/getAccountsForUser";
+import { getStrategiesForUser } from "@/lib/getStrategiesForUser";
+import EditTradeModal from "@/components/EditTradeModal";
 
 function parseNumber(value) {
   if (value === "" || value == null) return null;
@@ -18,10 +21,11 @@ function formatNum(n) {
 }
 
 const initialForm = {
+  account_id: "",
   strategy_id: "",
   date: "",
   symbol: "",
-  session: "",
+  session: "New York",
   direction: "long",
   contracts: "",
   points: "",
@@ -35,17 +39,119 @@ const initialForm = {
   stop_loss: "",
   trade_risk: "",
   actual_rr: "",
-  status: "closed",
+  status: "Win",
   notes: "",
   mistakes: "",
   trade_grade: "",
 };
 
+const SESSION_OPTIONS = ["New York", "London", "Asian"];
+
+const SYMBOLS_BY_ACCOUNT_TYPE = {
+  futures: ["ES", "NQ", "YM", "RTY", "MES", "MNQ", "MYM", "M2K", "CL", "MCL", "GC", "MGC", "SI", "MSL"],
+  crypto: ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "BNBUSD"],
+  forex: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD"],
+};
+
+const LAST_ACCOUNT_KEY = "lastTradeAccountId";
+
+function normalizeRules(rules) {
+  if (!rules) return { entry: [], exit: [], market: [], risk: [] }
+  if (typeof rules === 'object' && !Array.isArray(rules)) {
+    const entry = Array.isArray(rules.entry) ? rules.entry.map(r => String(r)).filter(Boolean) : []
+    const exit = Array.isArray(rules.exit) ? rules.exit.map(r => String(r)).filter(Boolean) : []
+    const market = Array.isArray(rules.market) ? rules.market.map(r => String(r)).filter(Boolean) : []
+    const risk = Array.isArray(rules.risk) ? rules.risk.map(r => String(r)).filter(Boolean) : []
+    return { entry, exit, market, risk }
+  }
+  if (Array.isArray(rules)) {
+    return { entry: rules.map(r => String(r)).filter(Boolean), exit: [], market: [], risk: [] }
+  }
+  return { entry: [], exit: [], market: [], risk: [] }
+}
+
 export default function NewTradePage() {
   const [form, setForm] = useState(initialForm);
+  const [accounts, setAccounts] = useState([]);
+  const [strategies, setStrategies] = useState([]);
+  const [metaLoading, setMetaLoading] = useState(true);
+  const [customSymbol, setCustomSymbol] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState(null);
+  const [strategyRules, setStrategyRules] = useState({ entry: [], exit: [], market: [], risk: [] })
+  const [rulesFollowed, setRulesFollowed] = useState({})
+  const [editTrade, setEditTrade] = useState(null);
+
+  useEffect(() => {
+    loadMetadata();
+  }, []);
+
+  useEffect(() => {
+    const selectedAccount = accounts.find((a) => a.id === form.account_id);
+    const accountType = String(selectedAccount?.type || "").toLowerCase();
+    const options = SYMBOLS_BY_ACCOUNT_TYPE[accountType] || [];
+    if (options.length === 0 || customSymbol) return;
+    if (!form.symbol || !options.includes(form.symbol)) {
+      setForm((prev) => ({ ...prev, symbol: options[0] }));
+    }
+  }, [accounts, form.account_id, form.symbol, customSymbol]);
+
+  useEffect(() => {
+    const selectedStrategy = strategies.find(s => s.id === form.strategy_id) || null
+    if (!selectedStrategy) {
+      setStrategyRules({ entry: [], exit: [], market: [], risk: [] })
+      setRulesFollowed({})
+      return
+    }
+    const nextRules = normalizeRules(selectedStrategy.rules)
+    setStrategyRules(nextRules)
+
+    const nextFollowed = {}
+    nextRules.entry.forEach((_label, i) => {
+      nextFollowed[`entry-${i}`] = true
+    })
+    nextRules.exit.forEach((_label, i) => {
+      nextFollowed[`exit-${i}`] = true
+    })
+    nextRules.market.forEach((_label, i) => {
+      nextFollowed[`market-${i}`] = true
+    })
+    nextRules.risk.forEach((_label, i) => {
+      nextFollowed[`risk-${i}`] = true
+    })
+    setRulesFollowed(nextFollowed)
+  }, [form.strategy_id, strategies]);
+
+  async function loadMetadata() {
+    setMetaLoading(true);
+    const [nextAccounts, nextStrategies] = await Promise.all([
+      getAccountsForUser().then((rows) => rows.map((a) => ({ id: a.id, name: a.name, type: a.type }))),
+      getStrategiesForUser({ select: "id, name, rules", order: { column: "name", ascending: true } }),
+    ]);
+
+    setAccounts(nextAccounts);
+    setStrategies(nextStrategies);
+
+    const rawSettings = localStorage.getItem("journalSettings");
+    const userDefaults = rawSettings ? JSON.parse(rawSettings) : null;
+    const preferredSession = SESSION_OPTIONS.includes(userDefaults?.defaultSession)
+      ? userDefaults.defaultSession
+      : "New York";
+    const preferredContracts =
+      userDefaults?.defaultContracts != null ? String(userDefaults.defaultContracts) : "";
+
+    const savedLastAccountId = localStorage.getItem(LAST_ACCOUNT_KEY) || "";
+    const hasSavedAccount = nextAccounts.some((a) => a.id === savedLastAccountId);
+    const defaultAccountId = hasSavedAccount ? savedLastAccountId : "";
+    setForm((prev) => ({
+      ...prev,
+      account_id: defaultAccountId,
+      session: preferredSession,
+      contracts: preferredContracts,
+    }));
+    setMetaLoading(false);
+  }
 
   const gross = parseNumber(form.gross_pnl);
   const fees = parseNumber(form.fees);
@@ -70,7 +176,16 @@ export default function NewTradePage() {
     return profitTarget / stopLoss;
   }, [profitTarget, stopLoss]);
 
+  const selectedAccountForLabels = accounts.find(a => a.id === form.account_id)
+  const accountTypeForLabels = String(selectedAccountForLabels?.type || '').toLowerCase()
+  const contractsLabel = accountTypeForLabels === 'forex' ? 'Lots' : 'Contracts'
+  const pointsLabel = accountTypeForLabels === 'forex' ? 'Pips' : 'Points'
+
   function updateField(name, value) {
+    if (name === "account_id" && typeof window !== "undefined") {
+      if (value) localStorage.setItem(LAST_ACCOUNT_KEY, value);
+      else localStorage.removeItem(LAST_ACCOUNT_KEY);
+    }
     setForm((prev) => ({ ...prev, [name]: value }));
     setSuccess(false);
     setError(null);
@@ -82,9 +197,25 @@ export default function NewTradePage() {
     setSuccess(false);
     setError(null);
 
+    const brokenLabels = [
+      ...strategyRules.entry
+        .map((label, i) => (rulesFollowed[`entry-${i}`] === false ? label : null))
+        .filter(Boolean),
+      ...strategyRules.exit
+        .map((label, i) => (rulesFollowed[`exit-${i}`] === false ? label : null))
+        .filter(Boolean),
+      ...strategyRules.market
+        .map((label, i) => (rulesFollowed[`market-${i}`] === false ? label : null))
+        .filter(Boolean),
+      ...strategyRules.risk
+        .map((label, i) => (rulesFollowed[`risk-${i}`] === false ? label : null))
+        .filter(Boolean),
+    ]
+    const computedMistakes = brokenLabels.length ? `Not followed: ${brokenLabels.join(", ")}` : null;
+
     const payload = {
-      account_id: null,
-      strategy_id: form.strategy_id.trim() || null,
+      account_id: form.account_id || null,
+      strategy_id: form.strategy_id || null,
       date: form.date || null,
       symbol: form.symbol.trim() || null,
       session: form.session.trim() || null,
@@ -104,13 +235,16 @@ export default function NewTradePage() {
       actual_rr: parseNumber(form.actual_rr),
       status: form.status.trim() || null,
       notes: form.notes.trim() || null,
-      mistakes: form.mistakes.trim() || null,
+      mistakes: computedMistakes,
       trade_grade: form.trade_grade.trim() || null,
+      reviewed: false,
     };
 
-    const { error: insertError } = await supabase
+    const { data: insertedTrade, error: insertError } = await supabase
       .from("trades")
-      .insert(payload);
+      .insert(payload)
+      .select("*")
+      .single();
 
     setSubmitting(false);
 
@@ -119,115 +253,257 @@ export default function NewTradePage() {
       return;
     }
 
+    const lastAccountId = form.account_id || "";
     setSuccess(true);
-    setForm(initialForm);
+    setForm((prev) => ({
+      ...initialForm,
+      account_id: lastAccountId,
+      session: prev.session,
+      contracts: prev.contracts,
+    }));
+    setStrategyRules({ entry: [], exit: [] })
+    setRulesFollowed({})
+    if (insertedTrade) setEditTrade(insertedTrade);
   }
 
-  const inputClass =
-    "w-full rounded-md border border-red-950/60 bg-black/60 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-red-600 focus:ring-2 focus:ring-red-600/25";
+  const inputStyle = {
+    width: "100%",
+    borderRadius: "8px",
+    border: "1px solid var(--border)",
+    background: "var(--bg3)",
+    color: "var(--text)",
+    fontSize: "13px",
+    padding: "9px 10px",
+    outline: "none",
+  };
 
-  const labelClass = "mb-1 block text-xs font-medium uppercase tracking-wide text-red-200/80";
+  const labelStyle = {
+    marginBottom: "6px",
+    display: "block",
+    fontSize: "11px",
+    fontFamily: "monospace",
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    color: "var(--text3)",
+  };
+
+  const sectionTitleStyle = {
+    marginBottom: "12px",
+    fontSize: "12px",
+    fontFamily: "monospace",
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    color: "var(--text2)",
+  };
 
   return (
-    <div className="min-h-full flex-1 bg-[#070707] text-zinc-100">
-      <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
-        <header className="mb-10 border-b border-red-950/50 pb-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-red-500/90">
-            Trading journal
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">
-            New trade
-          </h1>
-          <p className="mt-2 max-w-xl text-sm text-zinc-500">
-            Log execution, risk, and review fields. Net P&amp;L and planned R:R
-            update as you type.
-          </p>
+    <div style={{ minHeight: "100vh", background: "var(--page-bg)", color: "var(--text)" }}>
+      <div style={{ maxWidth: "980px", margin: "0 auto", padding: "26px 24px" }}>
+        <header style={{ marginBottom: "18px", borderBottom: "1px solid var(--border)", paddingBottom: "14px" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "11px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text3)" }}>
+                Trading journal
+              </p>
+              <h1 style={{ margin: "6px 0 0", fontSize: "30px", fontWeight: 700 }}>
+                New trade
+              </h1>
+              <p style={{ margin: "8px 0 0", maxWidth: "620px", fontSize: "13px", color: "var(--text3)" }}>
+                Log execution, risk, and review fields. Net P&amp;L and planned R:R
+                update as you type.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window === "undefined") return;
+                if (window.history.length > 1) {
+                  window.history.back();
+                  return;
+                }
+                window.location.href = "/";
+              }}
+              style={{
+                border: "1px solid var(--border-md)",
+                background: "var(--bg3)",
+                color: "var(--text2)",
+                borderRadius: "8px",
+                padding: "8px 12px",
+                fontSize: "12px",
+                fontFamily: "monospace",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              ← Back
+            </button>
+          </div>
         </header>
 
         {success && (
-          <div
-            className="mb-8 rounded-lg border border-emerald-900/50 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200"
-            role="status"
-          >
+          <div style={{ marginBottom: "12px", borderRadius: "8px", border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.08)", color: "#86efac", padding: "10px 12px", fontSize: "13px" }} role="status">
             Trade saved successfully.
           </div>
         )}
 
         {error && (
-          <div
-            className="mb-8 rounded-lg border border-red-800/60 bg-red-950/40 px-4 py-3 text-sm text-red-200"
-            role="alert"
-          >
+          <div style={{ marginBottom: "12px", borderRadius: "8px", border: "1px solid rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.08)", color: "#fca5a5", padding: "10px 12px", fontSize: "13px" }} role="alert">
             {error}
           </div>
         )}
 
         <form
           onSubmit={handleSubmit}
-          className="space-y-10 rounded-xl border border-red-950/40 bg-[#0c0c0c] p-6 shadow-[0_0_60px_-20px_rgba(185,28,28,0.35)] sm:p-8"
+          style={{ display: "grid", gap: "18px", border: "1px solid var(--border)", borderRadius: "12px", background: "var(--card-bg)", padding: "18px" }}
         >
           <section>
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-red-500/90">
+            <h2 style={sectionTitleStyle}>
               Setup
             </h2>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "12px" }}>
               <div>
-                <label className={labelClass} htmlFor="strategy_id">
-                  Strategy ID
+                <label style={labelStyle} htmlFor="account_id">
+                  Account
                 </label>
-                <input
-                  id="strategy_id"
-                  className={inputClass}
-                  value={form.strategy_id}
-                  onChange={(e) => updateField("strategy_id", e.target.value)}
-                  placeholder="UUID or reference"
-                />
+                <select
+                  id="account_id"
+                  style={inputStyle}
+                  value={form.account_id}
+                  onChange={(e) => updateField("account_id", e.target.value)}
+                >
+                  <option value="">Select account</option>
+                  {accounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name} ({account.type || "Unknown"})
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
-                <label className={labelClass} htmlFor="date">
+                <label style={labelStyle} htmlFor="strategy_id">
+                  Playbook
+                </label>
+                <select
+                  id="strategy_id"
+                  style={inputStyle}
+                  value={form.strategy_id}
+                  onChange={(e) => updateField("strategy_id", e.target.value)}
+                >
+                  <option value="">No play selected</option>
+                  {strategies.map((strategy) => (
+                    <option key={strategy.id} value={strategy.id}>
+                      {strategy.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle} htmlFor="date">
                   Date
                 </label>
                 <input
                   id="date"
                   type="date"
                   required
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.date}
                   onChange={(e) => updateField("date", e.target.value)}
                 />
               </div>
               <div>
-                <label className={labelClass} htmlFor="symbol">
+                <label style={labelStyle} htmlFor="symbol">
                   Symbol
                 </label>
-                <input
-                  id="symbol"
-                  className={inputClass}
-                  value={form.symbol}
-                  onChange={(e) => updateField("symbol", e.target.value)}
-                  placeholder="e.g. ES, NQ"
-                  required
-                />
+                {(() => {
+                  const selectedAccount = accounts.find((a) => a.id === form.account_id);
+                  const accountType = String(selectedAccount?.type || "").toLowerCase();
+                  const symbolOptions = SYMBOLS_BY_ACCOUNT_TYPE[accountType] || [];
+                  if (customSymbol || symbolOptions.length === 0) {
+                    return (
+                      <input
+                        id="symbol"
+                        style={inputStyle}
+                        value={form.symbol}
+                        onChange={(e) => updateField("symbol", e.target.value.toUpperCase())}
+                        placeholder="e.g. ES, NQ"
+                        required
+                      />
+                    );
+                  }
+                  return (
+                    <select
+                      id="symbol"
+                      style={inputStyle}
+                      value={form.symbol}
+                      onChange={(e) => {
+                        if (e.target.value === "__custom__") {
+                          setCustomSymbol(true);
+                          updateField("symbol", "");
+                          return;
+                        }
+                        updateField("symbol", e.target.value);
+                      }}
+                      required
+                    >
+                      {symbolOptions.map((symbol) => (
+                        <option key={symbol} value={symbol}>
+                          {symbol}
+                        </option>
+                      ))}
+                      <option value="__custom__">Custom symbol...</option>
+                    </select>
+                  );
+                })()}
+                {customSymbol && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const selectedAccount = accounts.find((a) => a.id === form.account_id);
+                      const accountType = String(selectedAccount?.type || "").toLowerCase();
+                      const symbolOptions = SYMBOLS_BY_ACCOUNT_TYPE[accountType] || [];
+                      setCustomSymbol(false);
+                      updateField("symbol", symbolOptions[0] || "");
+                    }}
+                    style={{
+                      marginTop: "6px",
+                      border: "1px solid var(--border)",
+                      background: "var(--bg3)",
+                      color: "var(--text2)",
+                      borderRadius: "6px",
+                      padding: "5px 8px",
+                      fontSize: "11px",
+                      fontFamily: "monospace",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Back to preset symbols
+                  </button>
+                )}
               </div>
               <div>
-                <label className={labelClass} htmlFor="session">
+                <label style={labelStyle} htmlFor="session">
                   Session
                 </label>
-                <input
+                <select
                   id="session"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.session}
                   onChange={(e) => updateField("session", e.target.value)}
-                  placeholder="RTH, overnight…"
-                />
+                >
+                  {SESSION_OPTIONS.map((session) => (
+                    <option key={session} value={session}>
+                      {session}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
-                <label className={labelClass} htmlFor="direction">
+                <label style={labelStyle} htmlFor="direction">
                   Direction
                 </label>
                 <select
                   id="direction"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.direction}
                   onChange={(e) => updateField("direction", e.target.value)}
                 >
@@ -236,101 +512,100 @@ export default function NewTradePage() {
                 </select>
               </div>
               <div>
-                <label className={labelClass} htmlFor="status">
+                <label style={labelStyle} htmlFor="status">
                   Status
                 </label>
                 <select
                   id="status"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.status}
                   onChange={(e) => updateField("status", e.target.value)}
                 >
-                  <option value="planning">Planning</option>
-                  <option value="open">Open</option>
-                  <option value="closed">Closed</option>
-                  <option value="cancelled">Cancelled</option>
+                  <option value="Win">Win</option>
+                  <option value="Loss">Loss</option>
+                  <option value="Breakeven">Breakeven</option>
                 </select>
               </div>
             </div>
           </section>
 
           <section>
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-red-500/90">
+            <h2 style={sectionTitleStyle}>
               Position
             </h2>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "12px" }}>
               <div>
-                <label className={labelClass} htmlFor="contracts">
-                  Contracts
+                <label style={labelStyle} htmlFor="contracts">
+                  {contractsLabel}
                 </label>
                 <input
                   id="contracts"
                   type="number"
                   step="any"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.contracts}
                   onChange={(e) => updateField("contracts", e.target.value)}
                 />
               </div>
               <div>
-                <label className={labelClass} htmlFor="points">
-                  Points
+                <label style={labelStyle} htmlFor="points">
+                  {pointsLabel}
                 </label>
                 <input
                   id="points"
                   type="number"
                   step="any"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.points}
                   onChange={(e) => updateField("points", e.target.value)}
                 />
               </div>
               <div>
-                <label className={labelClass} htmlFor="entry_price">
+                <label style={labelStyle} htmlFor="entry_price">
                   Entry price
                 </label>
                 <input
                   id="entry_price"
                   type="number"
                   step="any"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.entry_price}
                   onChange={(e) => updateField("entry_price", e.target.value)}
                 />
               </div>
               <div>
-                <label className={labelClass} htmlFor="exit_price">
+                <label style={labelStyle} htmlFor="exit_price">
                   Exit price
                 </label>
                 <input
                   id="exit_price"
                   type="number"
                   step="any"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.exit_price}
                   onChange={(e) => updateField("exit_price", e.target.value)}
                 />
               </div>
               <div>
-                <label className={labelClass} htmlFor="entry_time">
+                <label style={labelStyle} htmlFor="entry_time">
                   Entry time
                 </label>
                 <input
                   id="entry_time"
                   type="time"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.entry_time}
                   onChange={(e) => updateField("entry_time", e.target.value)}
                 />
               </div>
               <div>
-                <label className={labelClass} htmlFor="exit_time">
+                <label style={labelStyle} htmlFor="exit_time">
                   Exit time
                 </label>
                 <input
                   id="exit_time"
                   type="time"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.exit_time}
                   onChange={(e) => updateField("exit_time", e.target.value)}
                 />
@@ -339,42 +614,39 @@ export default function NewTradePage() {
           </section>
 
           <section>
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-red-500/90">
+            <h2 style={sectionTitleStyle}>
               P&amp;L
             </h2>
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: "12px" }}>
               <div>
-                <label className={labelClass} htmlFor="gross_pnl">
+                <label style={labelStyle} htmlFor="gross_pnl">
                   Gross P&amp;L
                 </label>
                 <input
                   id="gross_pnl"
                   type="number"
                   step="any"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.gross_pnl}
                   onChange={(e) => updateField("gross_pnl", e.target.value)}
                 />
               </div>
               <div>
-                <label className={labelClass} htmlFor="fees">
+                <label style={labelStyle} htmlFor="fees">
                   Fees
                 </label>
                 <input
                   id="fees"
                   type="number"
                   step="any"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.fees}
                   onChange={(e) => updateField("fees", e.target.value)}
                 />
               </div>
               <div>
-                <span className={labelClass}>Net P&amp;L (auto)</span>
-                <div
-                  className="flex min-h-[42px] items-center rounded-md border border-red-900/40 bg-black/80 px-3 text-sm font-mono tabular-nums text-red-300"
-                  aria-live="polite"
-                >
+                <span style={labelStyle}>Net P&amp;L (auto)</span>
+                <div style={{ minHeight: "38px", display: "flex", alignItems: "center", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--bg3)", padding: "0 10px", fontSize: "13px", fontFamily: "monospace", color: netPnl >= 0 ? "#22C55E" : "#EF4444" }} aria-live="polite">
                   {formatNum(netPnl)}
                 </div>
               </div>
@@ -382,71 +654,71 @@ export default function NewTradePage() {
           </section>
 
           <section>
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-red-500/90">
+            <h2 style={sectionTitleStyle}>
               Risk
             </h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "12px" }}>
               <div>
-                <label className={labelClass} htmlFor="profit_target">
+                <label style={labelStyle} htmlFor="profit_target">
                   Profit target
                 </label>
                 <input
                   id="profit_target"
                   type="number"
                   step="any"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.profit_target}
                   onChange={(e) => updateField("profit_target", e.target.value)}
                 />
               </div>
               <div>
-                <label className={labelClass} htmlFor="stop_loss">
+                <label style={labelStyle} htmlFor="stop_loss">
                   Stop loss
                 </label>
                 <input
                   id="stop_loss"
                   type="number"
                   step="any"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.stop_loss}
                   onChange={(e) => updateField("stop_loss", e.target.value)}
                 />
               </div>
               <div>
-                <label className={labelClass} htmlFor="trade_risk">
+                <label style={labelStyle} htmlFor="trade_risk">
                   Trade risk
                 </label>
-                <input
-                  id="trade_risk"
-                  type="number"
-                  step="any"
-                  className={inputClass}
-                  value={form.trade_risk}
-                  onChange={(e) => updateField("trade_risk", e.target.value)}
-                />
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontFamily: "monospace", color: "var(--text2)", fontSize: "13px" }}>$</span>
+                  <input
+                    id="trade_risk"
+                    type="number"
+                    step="any"
+                    style={{ ...inputStyle, flex: 1 }}
+                    value={form.trade_risk}
+                    onChange={(e) => updateField("trade_risk", e.target.value)}
+                  />
+                </div>
               </div>
               <div>
-                <label className={labelClass} htmlFor="actual_rr">
+                <label style={labelStyle} htmlFor="actual_rr">
                   Actual R:R
                 </label>
                 <input
                   id="actual_rr"
                   type="number"
                   step="any"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.actual_rr}
                   onChange={(e) => updateField("actual_rr", e.target.value)}
                 />
               </div>
-              <div className="sm:col-span-2 lg:col-span-4">
-                <span className={labelClass}>Planned R:R (auto)</span>
-                <div
-                  className="flex min-h-[42px] items-center rounded-md border border-red-900/40 bg-black/80 px-3 text-sm font-mono tabular-nums text-red-300"
-                  aria-live="polite"
-                >
+              <div style={{ gridColumn: "1 / -1" }}>
+                <span style={labelStyle}>Planned R:R (auto)</span>
+                <div style={{ minHeight: "38px", display: "flex", alignItems: "center", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--bg3)", padding: "0 10px", fontSize: "13px", fontFamily: "monospace", color: "var(--text2)" }} aria-live="polite">
                   {plannedRr == null ? "—" : formatNum(plannedRr)}
                   {stopLoss === 0 && profitTarget != null && (
-                    <span className="ml-2 text-xs text-red-400/80">
+                    <span style={{ marginLeft: "8px", fontSize: "11px", color: "#fca5a5" }}>
                       (stop loss cannot be 0)
                     </span>
                   )}
@@ -456,63 +728,131 @@ export default function NewTradePage() {
           </section>
 
           <section>
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-red-500/90">
+            <h2 style={sectionTitleStyle}>
               Review
             </h2>
-            <div className="grid gap-4">
+            <div style={{ display: "grid", gap: "12px" }}>
               <div>
-                <label className={labelClass} htmlFor="trade_grade">
+                <label style={labelStyle} htmlFor="trade_grade">
                   Trade grade
                 </label>
                 <input
                   id="trade_grade"
-                  className={inputClass}
+                  style={inputStyle}
                   value={form.trade_grade}
                   onChange={(e) => updateField("trade_grade", e.target.value)}
                   placeholder="A–F or score"
                 />
               </div>
               <div>
-                <label className={labelClass} htmlFor="notes">
+                <label style={labelStyle} htmlFor="notes">
                   Notes
                 </label>
                 <textarea
                   id="notes"
                   rows={3}
-                  className={`${inputClass} resize-y min-h-[88px]`}
+                  style={{ ...inputStyle, resize: "vertical", minHeight: "88px" }}
                   value={form.notes}
                   onChange={(e) => updateField("notes", e.target.value)}
                 />
               </div>
               <div>
-                <label className={labelClass} htmlFor="mistakes">
-                  Mistakes
-                </label>
-                <textarea
-                  id="mistakes"
-                  rows={3}
-                  className={`${inputClass} resize-y min-h-[88px]`}
-                  value={form.mistakes}
-                  onChange={(e) => updateField("mistakes", e.target.value)}
-                />
+                <label style={labelStyle}>Rules you followed</label>
+                <div
+                  style={{
+                    border: "1px solid rgba(124,58,237,0.30)",
+                    borderRadius: "12px",
+                    background: "rgba(124,58,237,0.08)",
+                    padding: "14px 14px",
+                    display: "grid",
+                    gap: "12px",
+                  }}
+                >
+                  {!form.strategy_id ? (
+                    <div style={{ fontSize: "12px", color: "var(--text3)", fontFamily: "monospace" }}>
+                      Select a playbook to see entry, exit, market, and risk rules.
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+                        {[
+                          { title: "Entry criteria", list: strategyRules.entry, prefix: "entry" },
+                          { title: "Exit criteria", list: strategyRules.exit, prefix: "exit" },
+                          { title: "Market conditions", list: strategyRules.market, prefix: "market" },
+                          { title: "Risk management", list: strategyRules.risk, prefix: "risk" },
+                        ].map(({ title, list, prefix }) => (
+                          <div key={prefix}>
+                            <div style={{ fontSize: "11px", fontFamily: "monospace", color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                              {title}
+                            </div>
+                            <div style={{ marginTop: "10px", display: "grid", gap: "8px" }}>
+                              {list.length ? (
+                                list.map((label, i) => {
+                                  const key = `${prefix}-${i}`
+                                  const checked = rulesFollowed[key] !== false
+                                  return (
+                                    <label
+                                      key={key}
+                                      style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", fontFamily: "monospace", fontSize: "13px" }}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={(e) => setRulesFollowed(prev => ({ ...prev, [key]: e.target.checked }))}
+                                        style={{ accentColor: "var(--accent)", width: "16px", height: "16px" }}
+                                      />
+                                      <span style={{ color: checked ? "var(--text)" : "var(--text2)" }}>{label}</span>
+                                    </label>
+                                  )
+                                })
+                              ) : (
+                                <div style={{ fontSize: "12px", color: "var(--text3)", fontFamily: "monospace" }}>
+                                  No {title.toLowerCase()} yet.
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{ fontSize: "11px", fontFamily: "monospace", color: "var(--text3)" }}>
+                        If any rule is unchecked, we save it into <span style={{ color: "var(--accent)" }}>mistakes</span> on the trade record.
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </section>
 
-          <div className="flex flex-col gap-3 border-t border-red-950/40 pt-6 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-zinc-600">
-              Account ID is unset until authentication is added.
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", borderTop: "1px solid var(--border)", paddingTop: "14px" }}>
+            <p style={{ margin: 0, fontSize: "11px", color: "var(--text3)" }}>
+              {metaLoading
+                ? "Loading account and playbook options..."
+                : "Account, playbook, session, and symbol presets are now linked to your setup."}
             </p>
             <button
               type="submit"
               disabled={submitting}
-              className="rounded-md bg-red-700 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-950/50 transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ borderRadius: "8px", border: "none", background: "#7C3AED", color: "#fff", fontSize: "12px", fontWeight: 600, fontFamily: "monospace", padding: "10px 18px", cursor: "pointer", opacity: submitting ? 0.65 : 1 }}
             >
               {submitting ? "Saving…" : "Save trade"}
             </button>
           </div>
         </form>
       </div>
+
+      {editTrade && (
+        <EditTradeModal
+          trade={editTrade}
+          onClose={() => setEditTrade(null)}
+          onSaved={() => {
+            setEditTrade(null);
+            setSuccess(true);
+            setError(null);
+          }}
+        />
+      )}
     </div>
   );
 }

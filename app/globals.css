@@ -1,26 +1,156 @@
-@import "tailwindcss";
-
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --accent: #7C3AED;
+  --accent-dim: #4C1D95;
+  --accent-subtle: rgba(124,58,237,0.08);
+  --accent-border: rgba(124,58,237,0.3);
+  --bg: #0D0D0D;
+  --bg2: #141414;
+  --bg3: #1C1C1C;
+  --bg4: #242424;
+  --border: rgba(255,255,255,0.07);
+  --border-md: rgba(255,255,255,0.12);
+  --border-strong: rgba(255,255,255,0.18);
+  --text: #F0EEE8;
+  --text2: #8A8880;
+  --text3: #555350;
+  --green: #22C55E;
+  --loss: #EF4444;
+  --card-bg: #141414;
+  --page-bg: #0D0D0D;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+[data-theme="light"] {
+  --bg: #F4F2FF;
+  --bg2: #FFFFFF;
+  --bg3: #EDE9FE;
+  --bg4: #DDD6FE;
+  --border: rgba(0,0,0,0.07);
+  --border-md: rgba(0,0,0,0.12);
+  --border-strong: rgba(0,0,0,0.2);
+  --text: #1E1B2E;
+  --text2: #4B4668;
+  --text3: #9492A8;
+  --card-bg: #FFFFFF;
+  --page-bg: #F4F2FF;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-weight: 700;
+  transition: background-color 0.2s, border-color 0.2s, color 0.15s;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Space Grotesk', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+input, select, textarea {
+  background: var(--bg3);
+  border: 1px solid var(--border-md);
+  border-radius: 7px;
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  padding: 8px 11px;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text3);
+}
+
+select {
+  cursor: pointer;
+  appearance: none;
+  padding-right: 28px;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-md);
+  border-radius: 2px;
+}
+
+/* TipTap / Word-style notes in trade review */
+.trade-notes-prose {
+  min-height: inherit;
+  padding: 12px 14px;
+  outline: none;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+.trade-notes-prose p {
+  margin: 0.4em 0;
+  font-weight: 400;
+}
+
+.trade-notes-prose ul,
+.trade-notes-prose ol {
+  margin: 0.4em 0;
+  padding-left: 1.35rem;
+  font-weight: 400;
+}
+
+.trade-notes-prose li {
+  margin: 0.2em 0;
+  font-weight: 400;
+}
+
+.trade-notes-prose li p {
+  margin: 0;
+}
+
+.trade-notes-prose ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.trade-notes-prose ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.trade-notes-prose ul[data-type="taskList"] li > label {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.trade-notes-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 8px 0;
+}
+
+.trade-notes-prose h2,
+.trade-notes-prose h3 {
+  font-weight: 700;
+  margin: 0.6em 0 0.35em;
+}
+
+.trade-notes-prose .is-editor-empty:first-child::before {
+  color: var(--text3);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  font-weight: 400;
 }
