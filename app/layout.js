@@ -1,3 +1,4 @@
+import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/lib/ThemeContext'
 import AppShell from '@/components/AppShell'
 import './globals.css'
@@ -9,6 +10,7 @@ export default function RootLayout({ children }) {
         <ThemeProvider>
           <AppShell>{children}</AppShell>
         </ThemeProvider>
+        <Analytics />
       </body>
     </html>
   )

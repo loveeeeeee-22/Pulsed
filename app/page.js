@@ -101,7 +101,13 @@ export default function Dashboard() {
   }
 
   async function fetchJournalEntries() {
-    const { data } = await supabase.from('journal_entries').select('*')
+    const { data: { session } } = await supabase.auth.getSession()
+    const uid = session?.user?.id
+    if (!uid) {
+      setJournalEntries([])
+      return
+    }
+    const { data } = await supabase.from('journal_entries').select('*').eq('user_id', uid)
     if (data) setJournalEntries(data)
   }
 
@@ -117,11 +123,17 @@ export default function Dashboard() {
   }
 
   async function saveNote(dateStr) {
+    const uid = sessionUser?.id
+    if (!uid) return
     const existing = journalEntries.find(e => e.date === dateStr)
     if (existing) {
       await supabase.from('journal_entries').update({ pre_market_notes: noteText }).eq('id', existing.id)
     } else {
-      await supabase.from('journal_entries').insert({ date: dateStr, pre_market_notes: noteText })
+      await supabase.from('journal_entries').insert({
+        date: dateStr,
+        pre_market_notes: noteText,
+        user_id: uid,
+      })
     }
     await fetchJournalEntries()
     setShowNote(false)

@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/supabase-js": "^2.100.1",
     "@tiptap/extension-color": "^3.22.1",
     "@tiptap/extension-image": "^3.22.1",
@@ -20,6 +21,7 @@
     "@tiptap/pm": "^3.22.1",
     "@tiptap/react": "^3.22.1",
     "@tiptap/starter-kit": "^3.22.1",
+    "@vercel/analytics": "^2.0.1",
     "country-state-city": "^3.2.1",
     "lightweight-charts": "^5.1.0",
     "next": "16.2.1",

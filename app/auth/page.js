@@ -1,11 +1,38 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Country, City } from 'country-state-city'
 import { supabase } from '@/lib/supabase'
 
+/** Shown when sign-up targets an email that already has an auth account. */
+const EMAIL_ALREADY_REGISTERED_MSG =
+  'This email is already registered. Use Log in with this email and your existing password instead of signing up again.'
+
+function isEmailAlreadyRegisteredAuthError(error) {
+  if (!error) return false
+  const code = String(error.code || '')
+  const m = String(error.message || '').toLowerCase()
+  if (code === 'user_already_exists' || code === 'email_exists') return true
+  return (
+    m.includes('user already registered') ||
+    m.includes('already registered') ||
+    m.includes('email address is already') ||
+    m.includes('email is already') ||
+    /email.*already.*registered|duplicate.*user/i.test(m)
+  )
+}
+
+/** When "Confirm email" is on, Supabase may return a fake user with no identities for an existing confirmed account (see GoTrueClient signUp docs). */
+function isObfuscatedDuplicateSignUp(data) {
+  const user = data?.user
+  if (!user) return false
+  const ids = user.identities
+  return Array.isArray(ids) && ids.length === 0
+}
+
 export default function AuthPage() {
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://app.pulsed.com'
+  const router = useRouter()
   const [mode, setMode] = useState('signup')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -21,6 +48,8 @@ export default function AuthPage() {
 
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   // Allow landing page links like `/auth?mode=login` or `/auth?mode=signup`.
   useEffect(() => {
@@ -55,8 +84,8 @@ export default function AuthPage() {
         return
       }
 
-      const redirectTo = `${APP_URL}/auth/confirm`
-      const { error } = await supabase.auth.signUp({
+      const redirectTo = `${window.location.origin}/auth/confirm`
+      const { data: signUpData, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -72,7 +101,18 @@ export default function AuthPage() {
         },
       })
       if (error) {
-        setMessage({ type: 'error', text: error.message })
+        if (isEmailAlreadyRegisteredAuthError(error)) {
+          setMessage({ type: 'error', text: EMAIL_ALREADY_REGISTERED_MSG })
+          setMode('login')
+        } else {
+          setMessage({ type: 'error', text: error.message })
+        }
+        setLoading(false)
+        return
+      }
+      if (isObfuscatedDuplicateSignUp(signUpData)) {
+        setMessage({ type: 'error', text: EMAIL_ALREADY_REGISTERED_MSG })
+        setMode('login')
         setLoading(false)
         return
       }
@@ -91,8 +131,21 @@ export default function AuthPage() {
       return
     }
 
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) {
+      setMessage({
+        type: 'error',
+        text: 'Login succeeded but the session was not ready. Try again, or hard-refresh this page.',
+      })
+      setLoading(false)
+      return
+    }
+
     setLoading(false)
-    window.location.replace(`${APP_URL}/`)
+    // Client-side navigation keeps the same Supabase singleton in memory; a full reload can race
+    // before the session is persisted to storage, which breaks the dashboard on some browsers.
+    router.replace('/')
+    router.refresh()
   }
 
   return (
@@ -134,6 +187,7 @@ export default function AuthPage() {
               onChange={e => setEmail(e.target.value)}
               placeholder="you@example.com"
               required
+              autoComplete="email"
             />
           </div>
 
@@ -201,27 +255,59 @@ export default function AuthPage() {
           ) : null}
 
           <div>
-            <label style={labelStyle}>{mode === 'signup' ? 'Create password' : 'Password'}</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+              <label htmlFor="auth-password" style={{ ...labelStyle, marginBottom: 0 }}>
+                {mode === 'signup' ? 'Create password' : 'Password'}
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowPassword(v => !v)}
+                aria-pressed={showPassword}
+                aria-controls="auth-password"
+                style={visibilityToggleStyle}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
             <input
-              type="password"
+              id="auth-password"
+              type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder="At least 6 characters"
               minLength={6}
               required
+              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+              style={{ width: '100%', boxSizing: 'border-box' }}
             />
           </div>
 
           {mode === 'signup' ? (
             <div>
-              <label style={labelStyle}>Confirm password</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                <label htmlFor="auth-confirm-password" style={{ ...labelStyle, marginBottom: 0 }}>
+                  Confirm password
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(v => !v)}
+                  aria-pressed={showConfirmPassword}
+                  aria-controls="auth-confirm-password"
+                  style={visibilityToggleStyle}
+                >
+                  {showConfirmPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
               <input
-                type="password"
+                id="auth-confirm-password"
+                type={showConfirmPassword ? 'text' : 'password'}
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
                 placeholder="Re-type your password"
                 minLength={6}
                 required
+                autoComplete="new-password"
+                style={{ width: '100%', boxSizing: 'border-box' }}
               />
             </div>
           ) : null}
@@ -258,4 +344,17 @@ const labelStyle = {
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
   color: 'var(--text3)',
+}
+
+const visibilityToggleStyle = {
+  flexShrink: 0,
+  border: 'none',
+  background: 'none',
+  color: 'var(--accent)',
+  fontFamily: 'monospace',
+  fontSize: '11px',
+  cursor: 'pointer',
+  padding: '2px 0',
+  textDecoration: 'underline',
+  textUnderlineOffset: '2px',
 }

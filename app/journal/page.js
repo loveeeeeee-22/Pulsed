@@ -36,9 +36,14 @@ function JournalContent() {
 
   async function fetchAll() {
     setLoading(true)
+    const { data: { session } } = await supabase.auth.getSession()
+    const uid = session?.user?.id
+    const journalPromise = uid
+      ? supabase.from('journal_entries').select('*').eq('user_id', uid)
+      : Promise.resolve({ data: [] })
     const [{ data: t }, { data: e }] = await Promise.all([
       getTradesForUser({ orderAscending: false }).then(data => ({ data })),
-      supabase.from('journal_entries').select('*'),
+      journalPromise,
     ])
     if (t) setTrades(t)
     if (e) setEntries(e)
@@ -46,12 +51,15 @@ function JournalContent() {
   }
 
   async function saveNote() {
+    const { data: { session } } = await supabase.auth.getSession()
+    const uid = session?.user?.id
+    if (!uid) return
     const existing = entries.find(e => e.date === noteDay)
     const html = noteEditorRef.current?.innerHTML || noteText
     if (existing) {
       await supabase.from('journal_entries').update({ pre_market_notes: html }).eq('id', existing.id)
     } else {
-      await supabase.from('journal_entries').insert({ date: noteDay, pre_market_notes: html })
+      await supabase.from('journal_entries').insert({ date: noteDay, pre_market_notes: html, user_id: uid })
     }
     await fetchAll()
     setNoteDay(null)

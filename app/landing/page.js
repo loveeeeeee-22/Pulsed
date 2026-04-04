@@ -1,7 +1,6 @@
 import Link from 'next/link'
 
 const accent = '#7C3AED'
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://app.pulsed.com'
 
 export default function LandingPage() {
   return (
@@ -15,7 +14,7 @@ export default function LandingPage() {
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <Link
-              href={`${APP_URL}/auth?mode=signup`}
+              href="/auth?mode=signup"
               style={{
                 textDecoration: 'none',
                 background: accent,
@@ -30,7 +29,7 @@ export default function LandingPage() {
               Sign up
             </Link>
             <Link
-              href={`${APP_URL}/auth?mode=login`}
+              href="/auth?mode=login"
               style={{
                 textDecoration: 'none',
                 border: '1px solid var(--border)',
@@ -87,14 +86,14 @@ export default function LandingPage() {
                 price: '$0',
                 desc: 'Start journaling and reviewing your trades.',
                 bullets: ['Core KPIs', 'Equity + Daily P&L', 'Basic Trade Replay'],
-                cta: { href: `${APP_URL}/auth?mode=signup`, label: 'Start free' },
+                cta: { href: '/auth?mode=signup', label: 'Start free' },
               },
               {
                 title: 'Pro',
                 price: '$9/mo',
                 desc: 'Unlock deeper insights and performance breakdowns.',
                 bullets: ['Advanced Analytics', 'Drawdown + streaks', 'Symbol performance tables'],
-                cta: { href: `${APP_URL}/auth?mode=signup`, label: 'Go Pro' },
+                cta: { href: '/auth?mode=signup', label: 'Go Pro' },
               },
             ].map(plan => (
               <div key={plan.title} style={{ border: `1px solid ${plan.title === 'Pro' ? 'rgba(124,58,237,0.6)' : 'var(--border)'}`, borderRadius: '14px', background: 'var(--card-bg)', padding: '18px' }}>

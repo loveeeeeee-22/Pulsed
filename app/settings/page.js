@@ -9,6 +9,7 @@ import SecuritySettingsSection from '@/components/SecuritySettingsSection'
 import SubscriptionSettingsSection from '@/components/SubscriptionSettingsSection'
 import AccountsSettingsSection from '@/components/AccountsSettingsSection'
 import GlobalSettingsSection from '@/components/GlobalSettingsSection'
+import AccountDeletionSection from '@/components/AccountDeletionSection'
 
 function SettingsItemIcon({ itemKey, active }) {
   const color = active ? 'var(--accent)' : 'var(--text3)'
@@ -62,6 +63,17 @@ function SettingsItemIcon({ itemKey, active }) {
         <path d="M16 16l4 4" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
       </svg>
     ),
+    'close-account': (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M9 3h6M10 3v2h4V3M6 6h12l-1 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 6Zm4 5v7m4-7v7"
+          stroke={color}
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
   }
   return icons[itemKey] || icons.profile
 }
@@ -84,6 +96,7 @@ export default function SettingsPage() {
         { key: 'profile', label: 'Profile' },
         { key: 'security', label: 'Security' },
         { key: 'subscription', label: 'Subscription' },
+        { key: 'close-account', label: 'Close account' },
       ],
     },
     {
@@ -99,7 +112,8 @@ export default function SettingsPage() {
 
   const selectedLabel =
     groups.flatMap(group => group.items).find(item => item.key === selectedItem)?.label || 'Profile'
-  const sectionTitle = selectedItem === 'security' ? 'Change your password' : selectedLabel
+  const sectionTitle =
+    selectedItem === 'security' ? 'Security' : selectedItem === 'close-account' ? 'Close account' : selectedLabel
 
   async function handleLogout() {
     setLogoutError(null)
@@ -217,7 +231,7 @@ export default function SettingsPage() {
             </div>
           </aside>
 
-          <section style={panelStyle}>
+          <section style={mainPanelStyle}>
             <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               Selected Section
             </div>
@@ -228,6 +242,8 @@ export default function SettingsPage() {
               </div>
             ) : selectedItem === 'security' ? (
               <SecuritySettingsSection />
+            ) : selectedItem === 'close-account' ? (
+              <AccountDeletionSection />
             ) : selectedItem === 'subscription' ? (
               <SubscriptionSettingsSection />
             ) : selectedItem === 'accounts' ? (
@@ -256,4 +272,10 @@ const panelStyle = {
   borderRadius: '12px',
   background: 'var(--card-bg)',
   padding: '16px',
+}
+
+const mainPanelStyle = {
+  ...panelStyle,
+  minHeight: 'min(70vh, 520px)',
+  overflow: 'auto',
 }
