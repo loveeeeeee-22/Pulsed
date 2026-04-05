@@ -66,6 +66,4 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Storage: create a public bucket named "avatars" in Dashboard → Storage, then add policies, e.g.:
---   - Authenticated users can upload to folder matching their user id
---   - Public read on avatars (if you use public URLs)
+-- Storage: run supabase/migrations/20260416120000_storage_avatars_bucket.sql (creates "avatars" bucket + RLS).

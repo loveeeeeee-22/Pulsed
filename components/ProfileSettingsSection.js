@@ -49,6 +49,18 @@ function formatJoined(iso) {
   }
 }
 
+function avatarUploadUserMessage(upErr) {
+  const m = String(upErr?.message || '')
+  const lc = m.toLowerCase()
+  if (lc.includes('bucket') && (lc.includes('not found') || lc.includes('does not exist') || lc.includes('404'))) {
+    return 'Photo not uploaded: the Storage bucket "avatars" is missing. In Supabase → SQL Editor, run `supabase/migrations/20260416120000_storage_avatars_bucket.sql`, then save again.'
+  }
+  if (lc.includes('row-level security') || lc.includes('violates row-level security') || lc.includes('rls')) {
+    return 'Photo not uploaded: Storage policies blocked the upload. Run `supabase/migrations/20260416120000_storage_avatars_bucket.sql` in the SQL Editor, then save again.'
+  }
+  return `Photo not uploaded (${m}). For a new project, run the avatars migration in supabase/migrations.`
+}
+
 export default function ProfileSettingsSection() {
   const [sessionUser, setSessionUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -240,7 +252,7 @@ export default function ProfileSettingsSection() {
         contentType: 'image/jpeg',
       })
       if (upErr) {
-        avatarWarn = `Photo not uploaded (${upErr.message}). Create an "avatars" bucket in Storage with upload access for signed-in users. `
+        avatarWarn = `${avatarUploadUserMessage(upErr)} `
         nextAvatarUrl = avatarUrl
       } else {
         const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path)
