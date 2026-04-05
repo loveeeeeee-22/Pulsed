@@ -18,6 +18,51 @@ function formatDateTick(dateStr) {
   return `${mm}/${dd}/${yy}`
 }
 
+/** e.g. Mar 1 — matches compact dashboard chart ticks */
+function formatDateTickShort(dateStr) {
+  if (!dateStr) return ''
+  const d = new Date(`${String(dateStr).slice(0, 10)}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return formatDateTick(dateStr)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function pointsToSmoothPath(points) {
+  if (!points.length) return ''
+  if (points.length === 1) return `M${points[0].x},${points[0].y}`
+  if (points.length === 2) {
+    return `M${points[0].x},${points[0].y} L${points[1].x},${points[1].y}`
+  }
+  let d = `M ${points[0].x} ${points[0].y}`
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)]
+    const p1 = points[i]
+    const p2 = points[i + 1]
+    const p3 = points[Math.min(points.length - 1, i + 2)]
+    const cp1x = p1.x + (p2.x - p0.x) / 6
+    const cp1y = p1.y + (p2.y - p0.y) / 6
+    const cp2x = p2.x - (p3.x - p1.x) / 6
+    const cp2y = p2.y - (p3.y - p1.y) / 6
+    d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`
+  }
+  return d
+}
+
+function smoothAreaPath(points, baselineY) {
+  const line = pointsToSmoothPath(points)
+  if (!line || !points.length) return ''
+  const last = points[points.length - 1]
+  const first = points[0]
+  return `${line} L ${last.x} ${baselineY} L ${first.x} ${baselineY} Z`
+}
+
+function MiniChartIcon({ color = 'var(--text3)' }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden style={{ flexShrink: 0, opacity: 0.7 }}>
+      <path d="M4 18V6M4 18h16M8 14l3-4 3 2 4-6" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 /** DB / forms use `long` / `short` (lowercase); Tradovate uses Long / Short. */
 function directionIsLong(direction) {
   const d = String(direction || '').toLowerCase()
@@ -135,12 +180,10 @@ export default function Dashboard() {
   const [noteText, setNoteText] = useState('')
   const [journalEntries, setJournalEntries] = useState([])
   const [hoveredEqIndex, setHoveredEqIndex] = useState(null)
-  const [hoveredBarIndex, setHoveredBarIndex] = useState(null)
   const [now, setNow] = useState(new Date())
   const [dashUsername, setDashUsername] = useState('')
   const noteRef = useRef(null)
   const eqSvgRef = useRef(null)
-  const barSvgRef = useRef(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [sessionUser, setSessionUser] = useState(null)
   const [strategies, setStrategies] = useState([])
@@ -427,31 +470,26 @@ export default function Dashboard() {
     }
   })
   const eqPoints = eqSeries.map(p => p.cumPnl)
-  const eqMin = eqPoints.length ? Math.min(0, ...eqPoints) : 0
-  const eqMax = eqPoints.length ? Math.max(0, ...eqPoints) : 0
   const eqW = 640
   const eqH = 220
   const eqPad = { left: 14, right: 14, top: 10, bottom: 36 }
   const eqPlotW = eqW - eqPad.left - eqPad.right
   const eqPlotH = eqH - eqPad.top - eqPad.bottom
-  const eqTicksX = buildIndexTicks(eqSeries.length, 5)
-  const eqZeroY =
-    eqPoints.length > 1 && eqMin < 0 && eqMax > 0
-      ? eqPad.top + (1 - (0 - eqMin) / (eqMax - eqMin || 1)) * eqPlotH
-      : null
+  const eqTicksX = buildIndexTicks(eqSeries.length, 6)
   const eqCoords = []
-  let eqPath = '', eqArea = ''
+  let eqLinePath = ''
+  let eqAreaPath = ''
   if (eqPoints.length > 1) {
-    const minV = Math.min(0, ...eqPoints), maxV = Math.max(0, ...eqPoints)
+    const minV = Math.min(0, ...eqPoints)
+    const maxV = Math.max(0, ...eqPoints)
     const range = maxV - minV || 1
-    const coords = eqPoints.map((v, i) => {
+    eqPoints.forEach((v, i) => {
       const x = eqPad.left + (i / (eqPoints.length - 1)) * eqPlotW
       const y = eqPad.top + (1 - (v - minV) / range) * eqPlotH
       eqCoords.push({ x, y })
-      return `${x},${y}`
     })
-    eqPath = 'M' + coords.join('L')
-    eqArea = eqPath + `L${eqPad.left + eqPlotW},${eqPad.top + eqPlotH} L${eqPad.left},${eqPad.top + eqPlotH} Z`
+    eqLinePath = pointsToSmoothPath(eqCoords)
+    eqAreaPath = smoothAreaPath(eqCoords, eqPad.top + eqPlotH)
   }
 
   // Drawdown from cumulative equity
@@ -469,41 +507,56 @@ export default function Dashboard() {
   const ddPad = { left: 14, right: 14, top: 10, bottom: 36 }
   const ddPlotW = ddW - ddPad.left - ddPad.right
   const ddPlotH = ddH - ddPad.top - ddPad.bottom
-  let ddPath = ''
+  const ddCoords = []
+  let ddLinePath = ''
+  let ddAreaPath = ''
   if (ddPointsOnly.length > 1) {
     const range = ddMaxVal - ddMinVal || 1
-    const coords = ddPointsOnly.map((v, i) => {
+    ddPointsOnly.forEach((v, i) => {
       const x = ddPad.left + (i / (ddPointsOnly.length - 1)) * ddPlotW
       const y = ddPad.top + (1 - (v - ddMinVal) / range) * ddPlotH
-      return `${x},${y}`
+      ddCoords.push({ x, y })
     })
-    ddPath = 'M' + coords.join('L')
+    ddLinePath = pointsToSmoothPath(ddCoords)
+    ddAreaPath = smoothAreaPath(ddCoords, ddPad.top + ddPlotH)
   }
-  const ddTicksX = buildIndexTicks(ddSeries.length, 5)
+  const ddTicksX = buildIndexTicks(ddSeries.length, 6)
 
   // Sparkline: last N trade PnLs
   const sparkN = 24
   const sparkTrades = filtered.slice(-sparkN)
   const sparkPts = sparkTrades.map((t) => parseFloat(t.net_pnl || 0))
-  const sparkFirstDate = sparkTrades[0]?.date?.slice(0, 10)
-  const sparkLastDate = sparkTrades[sparkTrades.length - 1]?.date?.slice(0, 10)
+  const sparkPeriodPnl = sparkPts.reduce((a, b) => a + b, 0)
   const sparkW = 640
-  const sparkH = 120
-  let sparkPath = ''
+  const sparkH = 200
+  const sparkPad = { left: 14, right: 14, top: 10, bottom: 34 }
+  const sparkPlotW = sparkW - sparkPad.left - sparkPad.right
+  const sparkPlotH = sparkH - sparkPad.top - sparkPad.bottom
+  const sparkCoords = []
+  let sparkLinePath = ''
+  let sparkAreaPath = ''
   if (sparkPts.length > 1) {
     const smin = Math.min(0, ...sparkPts)
     const smax = Math.max(0, ...sparkPts)
     const sr = smax - smin || 1
-    sparkPath =
-      'M' +
-      sparkPts
-        .map((v, i) => {
-          const x = (i / (sparkPts.length - 1)) * sparkW
-          const y = sparkH - ((v - smin) / sr) * (sparkH - 4) - 2
-          return `${x},${y}`
-        })
-        .join('L')
+    sparkPts.forEach((v, i) => {
+      const x = sparkPad.left + (i / (sparkPts.length - 1)) * sparkPlotW
+      const y = sparkPad.top + (1 - (v - smin) / sr) * sparkPlotH
+      sparkCoords.push({ x, y })
+    })
+    sparkLinePath = pointsToSmoothPath(sparkCoords)
+    sparkAreaPath = smoothAreaPath(sparkCoords, sparkPad.top + sparkPlotH)
+  } else if (sparkPts.length === 1) {
+    const v = sparkPts[0]
+    const smin = Math.min(0, v)
+    const smax = Math.max(0, v)
+    const sr = smax - smin || 1
+    const y = sparkPad.top + (1 - (v - smin) / sr) * sparkPlotH
+    sparkCoords.push({ x: sparkPad.left, y }, { x: sparkPad.left + sparkPlotW, y })
+    sparkLinePath = pointsToSmoothPath(sparkCoords)
+    sparkAreaPath = smoothAreaPath(sparkCoords, sparkPad.top + sparkPlotH)
   }
+  const sparkTicksX = buildIndexTicks(sparkTrades.length, 6)
 
   // Radar chart (5 axes, normalized 0–100)
   const radarLabels = ['Win %', 'Profit x', 'Reviewed', 'W/L x', 'Volume']
@@ -523,20 +576,6 @@ export default function Dashboard() {
   const radarPolyD = radarPolyPts.length
     ? 'M' + radarPolyPts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('L') + 'Z'
     : ''
-
-  // Daily bars
-  const dailyArr = Object.entries(dailyMap).sort(([a], [b]) => a.localeCompare(b))
-  const barMax = Math.max(...dailyArr.map(([, v]) => Math.abs(v.pnl)), 1)
-  const dailyTop = barMax
-  const dailyBottom = -barMax
-  const bW = 640
-  const bH = 220
-  const bPad = { left: 14, right: 14, top: 10, bottom: 36 }
-  const bPlotW = bW - bPad.left - bPad.right
-  const bPlotH = bH - bPad.top - bPad.bottom
-  const bMidY = bPad.top + bPlotH / 2
-  const dailyTicksX = buildIndexTicks(dailyArr.length, 4)
-  const barW = dailyArr.length > 0 ? Math.min(Math.floor(bW / dailyArr.length) - 3, 28) : 20
 
   // Calendar
   const year = currentDate.getFullYear()
@@ -576,16 +615,10 @@ export default function Dashboard() {
     const num = parseFloat(n)
     return (num >= 0 ? '+$' : '-$') + Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
-  const fmtAxisCurrency = (n) => {
-    const num = Number(n || 0)
-    const abs = Math.abs(num)
-    if (abs >= 1000) return `${num < 0 ? '-' : ''}$${(abs / 1000).toFixed(1)}k`
-    return `${num < 0 ? '-' : ''}$${abs.toFixed(0)}`
-  }
   const pnlColor = (n) => parseFloat(n) >= 0 ? '#22C55E' : '#EF4444'
+  const greenLine = '#22C55E'
   const hoveredEq = hoveredEqIndex !== null ? eqSeries[hoveredEqIndex] : null
   const hoveredEqCoord = hoveredEqIndex !== null ? eqCoords[hoveredEqIndex] : null
-  const hoveredBar = hoveredBarIndex !== null ? dailyArr[hoveredBarIndex] : null
 
   // Day detail data
   const dayTrades = selectedDay ? (dailyMap[selectedDay]?.trades || []) : []
@@ -1004,14 +1037,17 @@ export default function Dashboard() {
             </svg>
           </div>
           <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', minHeight: '280px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>Daily net cumulative P&amp;L</div>
-              <div style={{ fontSize: '13px', fontFamily: 'monospace', fontWeight: 600, color: pnlColor(totalPnl) }}>{fmtPnl(totalPnl)}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text3)', fontFamily: 'system-ui, sans-serif', letterSpacing: '0.02em' }}>Daily cumulative P&amp;L</div>
+                <div style={{ fontSize: '26px', fontFamily: 'ui-monospace, monospace', fontWeight: 700, color: pnlColor(totalPnl), marginTop: '6px', lineHeight: 1.15 }}>{fmtPnl(totalPnl)}</div>
+              </div>
+              <MiniChartIcon />
             </div>
             {eqPoints.length > 1 ? (
-              <div style={{ position: 'relative', width: '100%', aspectRatio: `${eqW} / ${eqH}`, minHeight: '180px' }}>
+              <div style={{ position: 'relative', width: '100%', aspectRatio: `${eqW} / ${eqH}`, minHeight: '160px' }}>
                 {hoveredEq && (
-                  <div style={{ position: 'absolute', top: '8px', left: '10px', zIndex: 3, pointerEvents: 'none', background: 'rgba(0,0,0,0.85)', border: '1px solid var(--border-md)', borderRadius: '8px', padding: '8px 10px' }}>
+                  <div style={{ position: 'absolute', top: '4px', left: '4px', zIndex: 3, pointerEvents: 'none', background: 'rgba(0,0,0,0.85)', border: '1px solid var(--border-md)', borderRadius: '8px', padding: '8px 10px' }}>
                     <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>{hoveredEq.date || 'No date'}</div>
                     <div style={{ fontSize: '12px', fontFamily: 'monospace', color: pnlColor(hoveredEq.tradePnl), marginTop: '2px' }}>Trade: {fmtPnl(hoveredEq.tradePnl)}</div>
                     <div style={{ fontSize: '12px', fontFamily: 'monospace', color: pnlColor(hoveredEq.cumPnl) }}>Cum: {fmtPnl(hoveredEq.cumPnl)}</div>
@@ -1034,29 +1070,25 @@ export default function Dashboard() {
                   onMouseLeave={() => setHoveredEqIndex(null)}
                 >
                   <defs>
-                    <linearGradient id="eqg" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={accent} stopOpacity="0.25"/>
-                      <stop offset="100%" stopColor={accent} stopOpacity="0.02"/>
+                    <linearGradient id="dash-eq-fill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={greenLine} stopOpacity="0.28" />
+                      <stop offset="100%" stopColor={greenLine} stopOpacity="0.03" />
                     </linearGradient>
                   </defs>
-                  <line x1={eqPad.left} y1={eqPad.top + eqPlotH} x2={eqPad.left + eqPlotW} y2={eqPad.top + eqPlotH} stroke="var(--border-md)" strokeWidth="0.8" />
-                  {eqZeroY !== null && (
-                    <line x1={eqPad.left} y1={eqZeroY} x2={eqPad.left + eqPlotW} y2={eqZeroY} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="4 4" opacity="0.6" />
-                  )}
+                  <path d={eqAreaPath} fill="url(#dash-eq-fill)" />
+                  <path d={eqLinePath} fill="none" stroke={greenLine} strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
                   {eqTicksX.map((idx) => {
                     const x = eqPad.left + (eqSeries.length > 1 ? (idx / (eqSeries.length - 1)) * eqPlotW : 0)
                     return (
-                      <text key={`eq-x-${idx}`} x={x} y={eqPad.top + eqPlotH + 22} textAnchor="middle" fontSize="9" fill="var(--text3)" fontFamily="monospace">
-                        {formatDateTick(eqSeries[idx]?.date)}
+                      <text key={`eq-x-${idx}`} x={x} y={eqPad.top + eqPlotH + 22} textAnchor="middle" fontSize="10" fill="var(--text3)" fontFamily="system-ui, sans-serif">
+                        {formatDateTickShort(eqSeries[idx]?.date)}
                       </text>
                     )
                   })}
-                  <path d={eqArea} fill="url(#eqg)"/>
-                  <path d={eqPath} fill="none" stroke={accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
                   {hoveredEqCoord && (
                     <>
-                      <line x1={hoveredEqCoord.x} y1={eqPad.top} x2={hoveredEqCoord.x} y2={eqPad.top + eqPlotH} stroke={accent} strokeOpacity="0.35" strokeDasharray="3 3"/>
-                      <circle cx={hoveredEqCoord.x} cy={hoveredEqCoord.y} r="4" fill={accent} stroke="white" strokeWidth="1.5"/>
+                      <line x1={hoveredEqCoord.x} y1={eqPad.top} x2={hoveredEqCoord.x} y2={eqPad.top + eqPlotH} stroke={greenLine} strokeOpacity="0.35" strokeDasharray="3 3" />
+                      <circle cx={hoveredEqCoord.x} cy={hoveredEqCoord.y} r="4" fill={greenLine} stroke="var(--card-bg)" strokeWidth="1.5" />
                     </>
                   )}
                 </svg>
@@ -1066,20 +1098,32 @@ export default function Dashboard() {
             )}
           </div>
           <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', minHeight: '200px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>Drawdown</div>
-              <div style={{ fontSize: '12px', fontFamily: 'monospace', fontWeight: 600, color: pnlColor(currentDrawdown) }}>{fmtPnl(currentDrawdown)} current</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text3)', fontFamily: 'system-ui, sans-serif', letterSpacing: '0.02em' }}>Drawdown</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '26px', fontFamily: 'ui-monospace, monospace', fontWeight: 700, color: pnlColor(currentDrawdown), lineHeight: 1.15 }}>{fmtPnl(currentDrawdown)}</span>
+                  <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text3)', fontFamily: 'system-ui, sans-serif' }}>current</span>
+                </div>
+              </div>
+              <MiniChartIcon />
             </div>
-            {ddPath ? (
-              <div style={{ width: '100%', aspectRatio: `${ddW} / ${ddH}`, minHeight: '160px' }}>
+            {ddLinePath ? (
+              <div style={{ width: '100%', aspectRatio: `${ddW} / ${ddH}`, minHeight: '150px' }}>
                 <svg width="100%" height="100%" viewBox={`0 0 ${ddW} ${ddH}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
-                  <line x1={ddPad.left} y1={ddPad.top + ddPlotH} x2={ddPad.left + ddPlotW} y2={ddPad.top + ddPlotH} stroke="var(--border-md)" strokeWidth="0.8" />
-                  <path d={ddPath} fill="none" stroke="var(--loss)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <defs>
+                    <linearGradient id="dash-dd-fill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#EF4444" stopOpacity="0.22" />
+                      <stop offset="100%" stopColor="#EF4444" stopOpacity="0.04" />
+                    </linearGradient>
+                  </defs>
+                  <path d={ddAreaPath} fill="url(#dash-dd-fill)" />
+                  <path d={ddLinePath} fill="none" stroke="#EF4444" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
                   {ddTicksX.map((idx) => {
                     const x = ddPad.left + (ddSeries.length > 1 ? (idx / (ddSeries.length - 1)) * ddPlotW : 0)
                     return (
-                      <text key={`dd-x-${idx}`} x={x} y={ddPad.top + ddPlotH + 22} textAnchor="middle" fontSize="9" fill="var(--text3)" fontFamily="monospace">
-                        {formatDateTick(ddSeries[idx]?.date)}
+                      <text key={`dd-x-${idx}`} x={x} y={ddPad.top + ddPlotH + 22} textAnchor="middle" fontSize="10" fill="var(--text3)" fontFamily="system-ui, sans-serif">
+                        {formatDateTickShort(ddSeries[idx]?.date)}
                       </text>
                     )
                   })}
@@ -1090,90 +1134,39 @@ export default function Dashboard() {
             )}
           </div>
           <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', minHeight: '200px' }}>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '8px' }}>Recent trade P&amp;L</div>
-            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginBottom: '10px' }}>Last {sparkPts.length} trades (filtered)</div>
-            {sparkPath ? (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
               <div>
-                <div style={{ width: '100%', aspectRatio: `${sparkW} / ${sparkH}`, minHeight: '100px' }}>
-                  <svg width="100%" height="100%" viewBox={`0 0 ${sparkW} ${sparkH}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
-                    <path d={sparkPath} fill="none" stroke={accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-                {(sparkFirstDate || sparkLastDate) && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', paddingLeft: '2px', paddingRight: '2px', fontSize: '9px', fontFamily: 'monospace', color: 'var(--text3)' }}>
-                    <span>{formatDateTick(sparkFirstDate)}</span>
-                    <span>{formatDateTick(sparkLastDate)}</span>
-                  </div>
-                )}
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text3)', fontFamily: 'system-ui, sans-serif', letterSpacing: '0.02em' }}>PNL</div>
+                <div style={{ fontSize: '26px', fontFamily: 'ui-monospace, monospace', fontWeight: 700, color: pnlColor(sparkPeriodPnl), marginTop: '6px', lineHeight: 1.15 }}>{sparkPts.length ? fmtPnl(sparkPeriodPnl) : fmtPnl(0)}</div>
+                <div style={{ fontSize: '10px', color: 'var(--text3)', fontFamily: 'system-ui, sans-serif', marginTop: '4px' }}>Last {sparkPts.length} trades (filtered)</div>
+              </div>
+              <MiniChartIcon />
+            </div>
+            {sparkLinePath ? (
+              <div style={{ width: '100%', aspectRatio: `${sparkW} / ${sparkH}`, minHeight: '140px' }}>
+                <svg width="100%" height="100%" viewBox={`0 0 ${sparkW} ${sparkH}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
+                  <defs>
+                    <linearGradient id="dash-spark-fill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={greenLine} stopOpacity="0.26" />
+                      <stop offset="100%" stopColor={greenLine} stopOpacity="0.03" />
+                    </linearGradient>
+                  </defs>
+                  <path d={sparkAreaPath} fill="url(#dash-spark-fill)" />
+                  <path d={sparkLinePath} fill="none" stroke={greenLine} strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
+                  {sparkTicksX.map((idx) => {
+                    const x = sparkPad.left + (sparkTrades.length > 1 ? (idx / (sparkTrades.length - 1)) * sparkPlotW : 0)
+                    return (
+                      <text key={`sp-x-${idx}`} x={x} y={sparkPad.top + sparkPlotH + 22} textAnchor="middle" fontSize="10" fill="var(--text3)" fontFamily="system-ui, sans-serif">
+                        {formatDateTickShort(sparkTrades[idx]?.date?.slice(0, 10))}
+                      </text>
+                    )
+                  })}
+                </svg>
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '72px', color: 'var(--text3)', fontSize: '12px', fontFamily: 'monospace' }}>No trades</div>
             )}
           </div>
-        </div>
-
-        <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', marginBottom: '20px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '12px' }}>Net daily P&amp;L</div>
-          {dailyArr.length > 0 ? (
-            <div style={{ position: 'relative' }}>
-              {hoveredBar && (
-                <div style={{ position: 'absolute', top: '8px', left: '10px', zIndex: 3, pointerEvents: 'none', background: 'rgba(0,0,0,0.85)', border: '1px solid var(--border-md)', borderRadius: '8px', padding: '8px 10px' }}>
-                  <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>{hoveredBar[0]}</div>
-                  <div style={{ fontSize: '12px', fontFamily: 'monospace', color: pnlColor(hoveredBar[1].pnl), marginTop: '2px' }}>PnL: {fmtPnl(hoveredBar[1].pnl)}</div>
-                  <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text2)' }}>{hoveredBar[1].count} trade{hoveredBar[1].count !== 1 ? 's' : ''}</div>
-                </div>
-              )}
-              <div style={{ width: '100%', aspectRatio: `${bW} / ${bH}`, minHeight: '180px' }}>
-              <svg
-                ref={barSvgRef}
-                width="100%"
-                height="100%"
-                viewBox={`0 0 ${bW} ${bH}`}
-                preserveAspectRatio="xMidYMid meet"
-                style={{ display: 'block' }}
-                onMouseMove={(e) => {
-                  const loc = clientPointToSvgXY(barSvgRef.current, e.clientX, e.clientY)
-                  if (!loc) return
-                  const ratio = (loc.x - bPad.left) / Math.max(bPlotW, 1)
-                  const idx = Math.max(0, Math.min(dailyArr.length - 1, Math.floor(ratio * dailyArr.length)))
-                  setHoveredBarIndex(idx)
-                }}
-                onMouseLeave={() => setHoveredBarIndex(null)}
-              >
-                <line x1={bPad.left} y1={bPad.top + bPlotH} x2={bPad.left + bPlotW} y2={bPad.top + bPlotH} stroke="var(--border-md)" strokeWidth="0.8"/>
-                <line x1={bPad.left} y1={bMidY} x2={bPad.left + bPlotW} y2={bMidY} stroke="var(--border)" strokeWidth="0.6" opacity="0.85"/>
-                {dailyArr.map(([, val], i) => {
-                  const slotW = bPlotW / Math.max(dailyArr.length, 1)
-                  const x = bPad.left + i * slotW + (slotW - barW) / 2
-                  const bh = Math.max((Math.abs(val.pnl) / barMax) * (bPlotH / 2 - 4), 2)
-                  const isPos = val.pnl >= 0
-                  return (
-                    <rect
-                      key={i}
-                      x={x}
-                      y={isPos ? bMidY - bh : bMidY}
-                      width={barW}
-                      height={bh}
-                      rx="3"
-                      fill={isPos ? '#22C55E' : '#EF4444'}
-                      opacity={hoveredBarIndex === null || hoveredBarIndex === i ? 0.95 : 0.45}
-                    />
-                  )
-                })}
-                {dailyTicksX.map((idx) => {
-                  const x = bPad.left + (dailyArr.length > 1 ? (idx / (dailyArr.length - 1)) * bPlotW : 0)
-                  return (
-                    <text key={`daily-x-${idx}`} x={x} y={bPad.top + bPlotH + 22} textAnchor="middle" fontSize="9" fill="var(--text3)" fontFamily="monospace">
-                      {formatDateTick(dailyArr[idx]?.[0])}
-                    </text>
-                  )
-                })}
-              </svg>
-              </div>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100px', color: 'var(--text3)', fontSize: '12px', fontFamily: 'monospace' }}>No data yet</div>
-          )}
         </div>
 
         {/* Calendar */}
