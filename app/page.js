@@ -1,9 +1,11 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { getAccountsForUser } from '@/lib/getAccountsForUser'
 import { getTradesForUser } from '@/lib/getTradesForUser'
-import { countTradesNeedingReview } from '@/lib/tradeReviewStatus'
+import { countTradesNeedingReview, isTradeReviewed } from '@/lib/tradeReviewStatus'
+import { getStrategiesForUser } from '@/lib/getStrategiesForUser'
+import { useTheme } from '@/lib/ThemeContext'
 import Link from 'next/link'
 
 function formatDateTick(dateStr) {
@@ -14,6 +16,28 @@ function formatDateTick(dateStr) {
   const dd = String(d.getDate()).padStart(2, '0')
   const yy = String(d.getFullYear()).slice(-2)
   return `${mm}/${dd}/${yy}`
+}
+
+/** DB / forms use `long` / `short` (lowercase); Tradovate uses Long / Short. */
+function directionIsLong(direction) {
+  const d = String(direction || '').toLowerCase()
+  return d === 'long' || d === 'l'
+}
+
+function directionIsShort(direction) {
+  const d = String(direction || '').toLowerCase()
+  return d === 'short' || d === 's'
+}
+
+/** Map viewport X to SVG user X when using preserveAspectRatio meet/slice (letterboxing). */
+function clientPointToSvgXY(svg, clientX, clientY) {
+  if (!svg?.createSVGPoint) return null
+  const pt = svg.createSVGPoint()
+  pt.x = clientX
+  pt.y = clientY
+  const ctm = svg.getScreenCTM()
+  if (!ctm) return null
+  return pt.matrixTransform(ctm.inverse())
 }
 
 function buildLinearTicks(minV, maxV, count = 5) {
@@ -30,7 +54,76 @@ function buildIndexTicks(length, count = 4) {
   return Array.from(idx).sort((a, b) => a - b)
 }
 
+function parseTimeToMinutes(t) {
+  if (!t || typeof t !== 'string') return null
+  const m = t.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/)
+  if (!m) return null
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10)
+}
+
+function tradeDurationMinutes(trade) {
+  const a = parseTimeToMinutes(trade.entry_time)
+  const b = parseTimeToMinutes(trade.exit_time)
+  if (a == null || b == null) return null
+  let d = b - a
+  if (d < 0) d += 24 * 60
+  return d
+}
+
+function formatDurationMins(mins) {
+  if (mins == null || !Number.isFinite(mins)) return '—'
+  const h = Math.floor(mins / 60)
+  const m = Math.round(mins % 60)
+  if (h <= 0) return `${m}m`
+  return `${h}h ${m.toString().padStart(2, '0')}m`
+}
+
+function computeStreaks(tradesChrono) {
+  let winStreak = 0
+  let lossStreak = 0
+  let maxWin = 0
+  let maxLoss = 0
+  for (const t of tradesChrono) {
+    if (t.status === 'Win') {
+      winStreak += 1
+      lossStreak = 0
+      maxWin = Math.max(maxWin, winStreak)
+    } else if (t.status === 'Loss') {
+      lossStreak += 1
+      winStreak = 0
+      maxLoss = Math.max(maxLoss, lossStreak)
+    } else {
+      winStreak = 0
+      lossStreak = 0
+    }
+  }
+  return { maxWin, maxLoss }
+}
+
+function exportTradesCsv(trades, filename = 'pulsed-trades-export.csv') {
+  const headers = ['date', 'symbol', 'direction', 'status', 'net_pnl', 'contracts', 'account_id', 'strategy_id', 'reviewed']
+  const rows = [headers.join(',')]
+  for (const t of trades) {
+    const r = headers.map((h) => {
+      let v = t[h]
+      if (h === 'reviewed') v = isTradeReviewed(t) ? 'yes' : 'no'
+      if (v == null) v = ''
+      const s = String(v).replace(/"/g, '""')
+      return `"${s}"`
+    })
+    rows.push(r.join(','))
+  }
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function Dashboard() {
+  const { theme, toggleTheme } = useTheme()
   const [trades, setTrades] = useState([])
   const [accounts, setAccounts] = useState([])
   const [selectedAccount, setSelectedAccount] = useState('all')
@@ -46,8 +139,14 @@ export default function Dashboard() {
   const [now, setNow] = useState(new Date())
   const [dashUsername, setDashUsername] = useState('')
   const noteRef = useRef(null)
+  const eqSvgRef = useRef(null)
+  const barSvgRef = useRef(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [sessionUser, setSessionUser] = useState(null)
+  const [strategies, setStrategies] = useState([])
+  const [journalFilter, setJournalFilter] = useState('all')
+  const [timeRange, setTimeRange] = useState('all')
+  const [strategyFilter, setStrategyFilter] = useState('all')
 
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', '#7C3AED')
@@ -86,6 +185,10 @@ export default function Dashboard() {
     fetchTrades()
     fetchJournalEntries()
     fetchDashProfile()
+    ;(async () => {
+      const list = await getStrategiesForUser({ select: 'id, name' })
+      setStrategies(Array.isArray(list) ? list : [])
+    })()
   }, [sessionUser?.id])
 
   async function fetchAccounts() {
@@ -139,9 +242,23 @@ export default function Dashboard() {
     setShowNote(false)
   }
 
-  const filtered = trades.filter(t =>
-    selectedAccount === 'all' || t.account_id === selectedAccount
-  )
+  const filtered = useMemo(() => {
+    let list = trades.filter(t => selectedAccount === 'all' || t.account_id === selectedAccount)
+    if (journalFilter === 'verified') list = list.filter(isTradeReviewed)
+    if (journalFilter === 'needs_review') list = list.filter(t => !isTradeReviewed(t))
+    if (strategyFilter !== 'all') {
+      list = list.filter(t => String(t.strategy_id || '') === strategyFilter)
+    }
+    if (timeRange !== 'all') {
+      const nowD = new Date()
+      const cutoff = new Date(nowD)
+      if (timeRange === 'week') cutoff.setDate(cutoff.getDate() - 7)
+      if (timeRange === 'month') cutoff.setMonth(cutoff.getMonth() - 1)
+      const cutStr = cutoff.toISOString().slice(0, 10)
+      list = list.filter(t => (t.date?.slice(0, 10) || '') >= cutStr)
+    }
+    return list
+  }, [trades, selectedAccount, journalFilter, strategyFilter, timeRange])
 
   if (!authLoading && !sessionUser) {
     return (
@@ -221,6 +338,31 @@ export default function Dashboard() {
   const dayWinRate = todayTrades.length ? ((todayWins.length / todayTrades.length) * 100).toFixed(0) : '0'
   const pendingReviewCount = countTradesNeedingReview(filtered)
 
+  const longTrades = filtered.filter(t => directionIsLong(t.direction))
+  const shortTrades = filtered.filter(t => directionIsShort(t.direction))
+  const longPnl = longTrades.reduce((s, t) => s + parseFloat(t.net_pnl || 0), 0)
+  const shortPnl = shortTrades.reduce((s, t) => s + parseFloat(t.net_pnl || 0), 0)
+  const otherDirCount = filtered.length - longTrades.length - shortTrades.length
+  const chronoForStreak = [...filtered].sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+  const { maxWin: maxWinStreak, maxLoss: maxLossStreak } = computeStreaks(chronoForStreak)
+  const durationSamples = filtered.map(tradeDurationMinutes).filter((m) => m != null && Number.isFinite(m))
+  const avgDurMins = durationSamples.length
+    ? durationSamples.reduce((a, b) => a + b, 0) / durationSamples.length
+    : null
+
+  const reviewedRatio = filtered.length ? filtered.filter(isTradeReviewed).length / filtered.length : 0
+  const pfNum = profitFactor === '∞' ? 3 : parseFloat(profitFactor) || 0
+  const wrNum = parseFloat(winRate) || 0
+  const arNum = avgRatio === '—' ? 0 : parseFloat(avgRatio) || 0
+  const radarVals = [
+    Math.min(Math.max(wrNum, 0), 100),
+    Math.min(Math.max((pfNum / 3) * 100, 0), 100),
+    Math.min(Math.max(reviewedRatio * 100, 0), 100),
+    Math.min(Math.max((arNum / 3) * 100, 0), 100),
+    Math.min(Math.max((filtered.length / 40) * 100, 0), 100),
+  ]
+  const pulsedScore = Math.round(radarVals.reduce((a, b) => a + b, 0) / radarVals.length)
+
   const selectedAcctObj = accounts.find(a => a.id === selectedAccount)
   const accountBalance = selectedAcctObj?.balance || 0
   const currentBalance = parseFloat(accountBalance) + totalPnl
@@ -287,12 +429,16 @@ export default function Dashboard() {
   const eqPoints = eqSeries.map(p => p.cumPnl)
   const eqMin = eqPoints.length ? Math.min(0, ...eqPoints) : 0
   const eqMax = eqPoints.length ? Math.max(0, ...eqPoints) : 0
-  const eqW = 500, eqH = 180
-  const eqPad = { left: 56, right: 8, top: 8, bottom: 24 }
+  const eqW = 640
+  const eqH = 220
+  const eqPad = { left: 14, right: 14, top: 10, bottom: 36 }
   const eqPlotW = eqW - eqPad.left - eqPad.right
   const eqPlotH = eqH - eqPad.top - eqPad.bottom
-  const eqTicksY = buildLinearTicks(eqMin, eqMax, 5)
-  const eqTicksX = buildIndexTicks(eqSeries.length, 4)
+  const eqTicksX = buildIndexTicks(eqSeries.length, 5)
+  const eqZeroY =
+    eqPoints.length > 1 && eqMin < 0 && eqMax > 0
+      ? eqPad.top + (1 - (0 - eqMin) / (eqMax - eqMin || 1)) * eqPlotH
+      : null
   const eqCoords = []
   let eqPath = '', eqArea = ''
   if (eqPoints.length > 1) {
@@ -308,13 +454,84 @@ export default function Dashboard() {
     eqArea = eqPath + `L${eqPad.left + eqPlotW},${eqPad.top + eqPlotH} L${eqPad.left},${eqPad.top + eqPlotH} Z`
   }
 
+  // Drawdown from cumulative equity
+  let ddPeak = 0
+  const ddSeries = eqSeries.map((p) => {
+    ddPeak = Math.max(ddPeak, p.cumPnl)
+    return { date: p.date, dd: p.cumPnl - ddPeak }
+  })
+  const ddPointsOnly = ddSeries.map((p) => p.dd)
+  const ddMinVal = ddPointsOnly.length ? Math.min(0, ...ddPointsOnly) : 0
+  const ddMaxVal = ddPointsOnly.length ? Math.max(0, ...ddPointsOnly) : 0
+  const currentDrawdown = ddPointsOnly.length ? ddPointsOnly[ddPointsOnly.length - 1] : 0
+  const ddW = 640
+  const ddH = 200
+  const ddPad = { left: 14, right: 14, top: 10, bottom: 36 }
+  const ddPlotW = ddW - ddPad.left - ddPad.right
+  const ddPlotH = ddH - ddPad.top - ddPad.bottom
+  let ddPath = ''
+  if (ddPointsOnly.length > 1) {
+    const range = ddMaxVal - ddMinVal || 1
+    const coords = ddPointsOnly.map((v, i) => {
+      const x = ddPad.left + (i / (ddPointsOnly.length - 1)) * ddPlotW
+      const y = ddPad.top + (1 - (v - ddMinVal) / range) * ddPlotH
+      return `${x},${y}`
+    })
+    ddPath = 'M' + coords.join('L')
+  }
+  const ddTicksX = buildIndexTicks(ddSeries.length, 5)
+
+  // Sparkline: last N trade PnLs
+  const sparkN = 24
+  const sparkTrades = filtered.slice(-sparkN)
+  const sparkPts = sparkTrades.map((t) => parseFloat(t.net_pnl || 0))
+  const sparkFirstDate = sparkTrades[0]?.date?.slice(0, 10)
+  const sparkLastDate = sparkTrades[sparkTrades.length - 1]?.date?.slice(0, 10)
+  const sparkW = 640
+  const sparkH = 120
+  let sparkPath = ''
+  if (sparkPts.length > 1) {
+    const smin = Math.min(0, ...sparkPts)
+    const smax = Math.max(0, ...sparkPts)
+    const sr = smax - smin || 1
+    sparkPath =
+      'M' +
+      sparkPts
+        .map((v, i) => {
+          const x = (i / (sparkPts.length - 1)) * sparkW
+          const y = sparkH - ((v - smin) / sr) * (sparkH - 4) - 2
+          return `${x},${y}`
+        })
+        .join('L')
+  }
+
+  // Radar chart (5 axes, normalized 0–100)
+  const radarLabels = ['Win %', 'Profit x', 'Reviewed', 'W/L x', 'Volume']
+  const radarR = 52
+  const radarCx = 70
+  const radarCy = 70
+  const radarAxis = (i, len) => {
+    const ang = (-Math.PI / 2) + (i * 2 * Math.PI) / len
+    return { x: radarCx + radarR * Math.cos(ang), y: radarCy + radarR * Math.sin(ang) }
+  }
+  const nAx = radarVals.length
+  const radarPolyPts = radarVals.map((v, i) => {
+    const t = v / 100
+    const ang = (-Math.PI / 2) + (i * 2 * Math.PI) / nAx
+    return { x: radarCx + radarR * t * Math.cos(ang), y: radarCy + radarR * t * Math.sin(ang) }
+  })
+  const radarPolyD = radarPolyPts.length
+    ? 'M' + radarPolyPts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('L') + 'Z'
+    : ''
+
   // Daily bars
   const dailyArr = Object.entries(dailyMap).sort(([a], [b]) => a.localeCompare(b))
   const barMax = Math.max(...dailyArr.map(([, v]) => Math.abs(v.pnl)), 1)
   const dailyTop = barMax
   const dailyBottom = -barMax
-  const bW = 500, bH = 180
-  const bPad = { left: 56, right: 8, top: 8, bottom: 24 }
+  const bW = 640
+  const bH = 220
+  const bPad = { left: 14, right: 14, top: 10, bottom: 36 }
   const bPlotW = bW - bPad.left - bPad.right
   const bPlotH = bH - bPad.top - bPad.bottom
   const bMidY = bPad.top + bPlotH / 2
@@ -401,63 +618,206 @@ export default function Dashboard() {
 
   const existingNote = journalEntries.find(e => e.date === selectedDay)
 
-  function Donut({ pct, color, size = 56, stroke = 7 }) {
-    const r = (size - stroke * 2) / 2
-    const circ = 2 * Math.PI * r
-    const dash = Math.min((pct / 100) * circ, circ)
-    return (
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={stroke}/>
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color}
-          strokeWidth={stroke} strokeDasharray={`${dash} ${circ}`}
-          strokeLinecap="round" transform={`rotate(-90 ${size/2} ${size/2})`}/>
-      </svg>
-    )
+  const pillBtn = (active) => ({
+    padding: '7px 14px',
+    borderRadius: '999px',
+    border: `1px solid ${active ? accent : 'var(--border-md)'}`,
+    background: active ? 'var(--accent-subtle)' : 'var(--bg3)',
+    color: active ? accent : 'var(--text2)',
+    fontFamily: 'monospace',
+    fontSize: '11px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  })
+
+  const toolBtn = {
+    padding: '8px 14px',
+    borderRadius: '8px',
+    border: '1px solid var(--border-md)',
+    background: 'var(--bg3)',
+    color: 'var(--text2)',
+    fontFamily: 'monospace',
+    fontSize: '11px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    textDecoration: 'none',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
   }
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--page-bg)', color: 'var(--text)', fontFamily: 'sans-serif' }}>
 
-      {/* Top bar */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px', borderBottom: '1px solid var(--border)', background: 'var(--card-bg)' }}>
+      {/* Page header — TradeSync-style title row */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: '16px',
+          flexWrap: 'wrap',
+          padding: '18px 24px 14px',
+          borderBottom: '1px solid var(--border)',
+          background: 'var(--card-bg)',
+        }}
+      >
         <div>
-          <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Dashboard</div>
-          <div style={{ fontSize: '18px', fontWeight: '600' }}>
-            {greeting}
-            {dashUsername ? ` ${dashUsername}` : ''} 👋
+          <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '4px' }}>
+            Pulsed
           </div>
+          <h1 style={{ fontSize: '22px', fontWeight: 700, letterSpacing: '-0.02em', margin: 0, color: 'var(--text)' }}>Journaling Dashboard</h1>
+          <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text3)', fontWeight: 500 }}>
+            {greeting}
+            {dashUsername ? ` ${dashUsername}` : ''}
+          </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)}
-            style={{ background: 'var(--bg3)', border: '1px solid var(--border-md)', borderRadius: '7px', color: 'var(--text)', fontFamily: 'monospace', fontSize: '12px', padding: '6px 24px 6px 10px', outline: 'none', cursor: 'pointer', appearance: 'none' }}>
-            <option value="all">All Accounts</option>
-            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-          <Link
-            href="/new-trade"
-            aria-label="Add trade"
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <span
             style={{
-              background: accent,
-              color: '#fff',
-              borderRadius: '999px',
-              width: '28px',
-              height: '28px',
-              padding: 0,
-              fontSize: '18px',
-              fontWeight: 600,
-              textDecoration: 'none',
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              lineHeight: 1,
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '999px',
+              background: 'rgba(34,197,94,0.12)',
+              border: '1px solid rgba(34,197,94,0.35)',
+              color: 'var(--green)',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+              fontWeight: 600,
             }}
           >
-            +
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--green)' }} />
+            Session active
+          </span>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+            style={{
+              ...toolBtn,
+              width: '40px',
+              height: '36px',
+              padding: 0,
+              justifyContent: 'center',
+              borderRadius: '10px',
+            }}
+          >
+            {theme === 'dark' ? '☀' : '☾'}
+          </button>
+          <Link href="/settings" style={{ ...toolBtn, borderRadius: '10px', padding: '8px 12px' }}>
+            Settings
           </Link>
         </div>
       </div>
 
-      <div style={{ padding: '20px 24px' }}>
+      {/* Filters + actions */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '14px',
+          flexWrap: 'wrap',
+          padding: '12px 24px',
+          borderBottom: '1px solid var(--border)',
+          background: 'var(--bg2)',
+        }}
+      >
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginRight: '4px' }}>Scope</span>
+          {[
+            { id: 'all', label: 'All trades' },
+            { id: 'verified', label: 'Reviewed' },
+            { id: 'needs_review', label: 'Needs review' },
+          ].map((p) => (
+            <button key={p.id} type="button" onClick={() => setJournalFilter(p.id)} style={pillBtn(journalFilter === p.id)}>
+              {p.label}
+            </button>
+          ))}
+          <span style={{ width: '1px', height: '20px', background: 'var(--border-md)', margin: '0 4px' }} />
+          {[
+            { id: 'all', label: 'All time' },
+            { id: 'month', label: '30d' },
+            { id: 'week', label: '7d' },
+          ].map((p) => (
+            <button key={p.id} type="button" onClick={() => setTimeRange(p.id)} style={pillBtn(timeRange === p.id)}>
+              {p.label}
+            </button>
+          ))}
+          <select
+            value={selectedAccount}
+            onChange={(e) => setSelectedAccount(e.target.value)}
+            style={{
+              marginLeft: '6px',
+              maxWidth: '160px',
+              background: 'var(--bg3)',
+              border: '1px solid var(--border-md)',
+              borderRadius: '999px',
+              color: 'var(--text)',
+              fontFamily: 'monospace',
+              fontSize: '11px',
+              padding: '6px 28px 6px 12px',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="all">All accounts</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={strategyFilter}
+            onChange={(e) => setStrategyFilter(e.target.value)}
+            style={{
+              maxWidth: '150px',
+              background: 'var(--bg3)',
+              border: '1px solid var(--border-md)',
+              borderRadius: '999px',
+              color: 'var(--text)',
+              fontFamily: 'monospace',
+              fontSize: '11px',
+              padding: '6px 28px 6px 12px',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="all">All strategies</option>
+            {strategies.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+          <button type="button" onClick={() => exportTradesCsv(filtered)} style={toolBtn}>
+            Export CSV
+          </button>
+          <Link href="/new-trade" style={toolBtn}>
+            + Log trade
+          </Link>
+          <Link href="/settings/brokers" style={toolBtn}>
+            Sync
+          </Link>
+          <Link
+            href="/journal"
+            style={{
+              ...toolBtn,
+              background: accent,
+              color: '#fff',
+              borderColor: accent,
+            }}
+          >
+            + Journal
+          </Link>
+        </div>
+      </div>
+
+      <div style={{ padding: '20px 24px 32px', maxWidth: '1600px', margin: '0 auto' }}>
 
         {pendingReviewCount > 0 ? (
           <div
@@ -531,61 +891,125 @@ export default function Dashboard() {
           </div>
         ) : null}
 
-        {/* KPI cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '12px', marginBottom: '20px' }}>
-          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', position: 'relative', overflow: 'hidden' }}>
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: accent }}/>
-            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>Net P&L</div>
-            <div style={{ fontSize: '22px', fontFamily: 'monospace', fontWeight: '700', color: pnlColor(totalPnl) }}>{fmtPnl(totalPnl)}</div>
-            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginTop: '4px' }}>{filtered.length} trades</div>
+        {/* KPI strip — reference-style metric cards */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '12px',
+            marginBottom: '20px',
+          }}
+        >
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: accent }} />
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>Net P&amp;L (filtered)</div>
+            <div style={{ fontSize: '22px', fontFamily: 'monospace', fontWeight: 700, color: pnlColor(totalPnl) }}>{fmtPnl(totalPnl)}</div>
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginTop: '6px' }}>{filtered.length} trades · {winRate}% win</div>
           </div>
-          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <Donut pct={parseFloat(winRate)} color={accent}/>
-            <div>
-              <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px' }}>Trade Win %</div>
-              <div style={{ fontSize: '20px', fontFamily: 'monospace', fontWeight: '700', color: 'var(--text)' }}>{winRate}%</div>
-              <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>{wins.length}W · {losses.length}L</div>
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px' }}>
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>Day win %</div>
+            <div style={{ fontSize: '24px', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{dayWinRate}%</div>
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginTop: '4px' }}>
+              {todayWins.length}W – {todayTrades.length - todayWins.length}L today
+            </div>
+            <div style={{ marginTop: '10px', height: '6px', borderRadius: '4px', background: 'var(--bg3)', overflow: 'hidden', display: 'flex' }}>
+              <div style={{ flex: Math.max(todayWins.length, 1), background: 'var(--green)', minWidth: todayWins.length ? '8px' : 0 }} />
+              <div style={{ flex: Math.max(todayTrades.length - todayWins.length, 0.001), background: 'var(--loss)', minWidth: todayTrades.length > todayWins.length ? '8px' : 0 }} />
             </div>
           </div>
-          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <Donut pct={Math.min(parseFloat(profitFactor === '∞' ? 3 : profitFactor) / 3 * 100, 100)} color={parseFloat(profitFactor) >= 1.5 ? '#22C55E' : parseFloat(profitFactor) >= 1 ? '#EAB308' : '#EF4444'}/>
-            <div>
-              <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px' }}>Profit Factor</div>
-              <div style={{ fontSize: '20px', fontFamily: 'monospace', fontWeight: '700', color: 'var(--text)' }}>{profitFactor}</div>
-              <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>gross win ÷ loss</div>
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px' }}>
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>Avg win / loss</div>
+            <div style={{ fontSize: '18px', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>${avgWin}</div>
+            <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', marginTop: '4px' }}>vs −${avgLoss} avg loss · ratio {avgRatio}</div>
+            <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+              <div style={{ flex: 1, height: '4px', borderRadius: '3px', background: 'rgba(34,197,94,0.35)' }} />
+              <div style={{ flex: 1, height: '4px', borderRadius: '3px', background: 'rgba(239,68,68,0.35)' }} />
             </div>
           </div>
-          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <Donut pct={parseFloat(dayWinRate)} color={accent}/>
-            <div>
-              <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px' }}>Day Win %</div>
-              <div style={{ fontSize: '20px', fontFamily: 'monospace', fontWeight: '700', color: 'var(--text)' }}>{dayWinRate}%</div>
-              <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>{todayTrades.length} trades today</div>
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px' }}>
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>Long vs short</div>
+            <div style={{ fontSize: '20px', fontFamily: 'monospace', fontWeight: 700, color: pnlColor(longPnl + shortPnl) }}>{fmtPnl(longPnl + shortPnl)}</div>
+            <div style={{ fontSize: '11px', fontFamily: 'monospace', marginTop: '6px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+              <span style={{ color: 'var(--green)' }}>L {fmtPnl(longPnl)}</span>
+              <span style={{ color: 'var(--loss)' }}>S {fmtPnl(shortPnl)}</span>
+            </div>
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginTop: '6px' }}>
+              {longTrades.length} long · {shortTrades.length} short
+              {otherDirCount > 0 ? ` · ${otherDirCount} other / blank` : ''}
             </div>
           </div>
-          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px' }}>
-            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>Avg Win / Loss</div>
-            <div style={{ fontSize: '20px', fontFamily: 'monospace', fontWeight: '700', color: 'var(--text)', marginBottom: '6px' }}>{avgRatio}</div>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <div style={{ flex: 1, background: 'rgba(34,197,94,0.1)', borderRadius: '4px', padding: '3px 6px', textAlign: 'center' }}>
-                <div style={{ fontSize: '11px', fontFamily: 'monospace', color: '#22C55E', fontWeight: '600' }}>${avgWin}</div>
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px' }}>
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>Max streaks</div>
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}>
+              <div>
+                <div style={{ fontSize: '22px', fontFamily: 'monospace', fontWeight: 700, color: 'var(--green)' }}>{maxWinStreak}</div>
+                <div style={{ fontSize: '10px', color: 'var(--text3)' }}>wins</div>
               </div>
-              <div style={{ flex: 1, background: 'rgba(239,68,68,0.1)', borderRadius: '4px', padding: '3px 6px', textAlign: 'center' }}>
-                <div style={{ fontSize: '11px', fontFamily: 'monospace', color: '#EF4444', fontWeight: '600' }}>-${avgLoss}</div>
+              <div>
+                <div style={{ fontSize: '22px', fontFamily: 'monospace', fontWeight: 700, color: 'var(--loss)' }}>{maxLossStreak}</div>
+                <div style={{ fontSize: '10px', color: 'var(--text3)' }}>losses</div>
               </div>
             </div>
+          </div>
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px' }}>
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>Avg hold (time)</div>
+            <div style={{ fontSize: '22px', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{formatDurationMins(avgDurMins)}</div>
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginTop: '4px' }}>From entry/exit times when set</div>
           </div>
         </div>
 
-        {/* Charts */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', minHeight: '280px' }}>
+        {/* Charts — radar + equity + drawdown + sparkline */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+            gap: '16px',
+            marginBottom: '16px',
+          }}
+        >
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', minHeight: '240px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>Pulsed score</div>
+              <div style={{ fontSize: '18px', fontFamily: 'monospace', fontWeight: 700, color: accent }}>{pulsedScore}</div>
+            </div>
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginBottom: '10px', lineHeight: 1.4 }}>
+              Blend of win rate, profit factor, review coverage, payoff ratio, and sample size (heuristic).
+            </div>
+            <svg width="100%" height="200" viewBox="0 0 140 140" style={{ display: 'block', margin: '0 auto', maxWidth: '200px' }}>
+              {[0.25, 0.5, 0.75, 1].map((t) => (
+                <polygon
+                  key={t}
+                  fill="none"
+                  stroke="var(--border-md)"
+                  strokeWidth="0.6"
+                  points={Array.from({ length: nAx }, (_, i) => {
+                    const { x, y } = radarAxis(i, nAx)
+                    const px = radarCx + (x - radarCx) * t
+                    const py = radarCy + (y - radarCy) * t
+                    return `${px.toFixed(1)},${py.toFixed(1)}`
+                  }).join(' ')}
+                />
+              ))}
+              {radarLabels.map((lbl, i) => {
+                const { x, y } = radarAxis(i, nAx)
+                const lx = radarCx + (x - radarCx) * 1.18
+                const ly = radarCy + (y - radarCy) * 1.18
+                return (
+                  <text key={lbl} x={lx} y={ly} textAnchor="middle" fontSize="7" fill="var(--text3)" fontFamily="monospace">
+                    {lbl}
+                  </text>
+                )
+              })}
+              <path d={radarPolyD} fill={`${accent}33`} stroke={accent} strokeWidth="1.5" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', minHeight: '280px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text)' }}>Daily Net Cumulative P&L</div>
-              <div style={{ fontSize: '13px', fontFamily: 'monospace', fontWeight: '600', color: pnlColor(totalPnl) }}>{fmtPnl(totalPnl)}</div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>Daily net cumulative P&amp;L</div>
+              <div style={{ fontSize: '13px', fontFamily: 'monospace', fontWeight: 600, color: pnlColor(totalPnl) }}>{fmtPnl(totalPnl)}</div>
             </div>
             {eqPoints.length > 1 ? (
-              <div style={{ position: 'relative' }}>
+              <div style={{ position: 'relative', width: '100%', aspectRatio: `${eqW} / ${eqH}`, minHeight: '180px' }}>
                 {hoveredEq && (
                   <div style={{ position: 'absolute', top: '8px', left: '10px', zIndex: 3, pointerEvents: 'none', background: 'rgba(0,0,0,0.85)', border: '1px solid var(--border-md)', borderRadius: '8px', padding: '8px 10px' }}>
                     <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>{hoveredEq.date || 'No date'}</div>
@@ -594,14 +1018,16 @@ export default function Dashboard() {
                   </div>
                 )}
                 <svg
+                  ref={eqSvgRef}
                   width="100%"
-                  height="210"
+                  height="100%"
                   viewBox={`0 0 ${eqW} ${eqH}`}
-                  preserveAspectRatio="none"
+                  preserveAspectRatio="xMidYMid meet"
+                  style={{ display: 'block' }}
                   onMouseMove={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const rawX = ((e.clientX - rect.left) / rect.width) * eqW
-                    const ratio = (rawX - eqPad.left) / Math.max(eqPlotW, 1)
+                    const loc = clientPointToSvgXY(eqSvgRef.current, e.clientX, e.clientY)
+                    if (!loc) return
+                    const ratio = (loc.x - eqPad.left) / Math.max(eqPlotW, 1)
                     const idx = Math.max(0, Math.min(eqSeries.length - 1, Math.round(ratio * (eqSeries.length - 1))))
                     setHoveredEqIndex(idx)
                   }}
@@ -614,20 +1040,13 @@ export default function Dashboard() {
                     </linearGradient>
                   </defs>
                   <line x1={eqPad.left} y1={eqPad.top + eqPlotH} x2={eqPad.left + eqPlotW} y2={eqPad.top + eqPlotH} stroke="var(--border-md)" strokeWidth="0.8" />
-                  <line x1={eqPad.left} y1={eqPad.top} x2={eqPad.left} y2={eqPad.top + eqPlotH} stroke="var(--border-md)" strokeWidth="0.8" />
-                  {eqTicksY.map((t, i) => {
-                    const y = eqPad.top + (1 - ((t - eqMin) / (eqMax - eqMin || 1))) * eqPlotH
-                    return (
-                      <g key={`eq-y-${i}`}>
-                        <line x1={eqPad.left} y1={y} x2={eqPad.left + eqPlotW} y2={y} stroke="var(--border)" strokeWidth="0.5" />
-                        <text x={eqPad.left - 6} y={y + 3} textAnchor="end" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">{fmtAxisCurrency(t)}</text>
-                      </g>
-                    )
-                  })}
+                  {eqZeroY !== null && (
+                    <line x1={eqPad.left} y1={eqZeroY} x2={eqPad.left + eqPlotW} y2={eqZeroY} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="4 4" opacity="0.6" />
+                  )}
                   {eqTicksX.map((idx) => {
                     const x = eqPad.left + (eqSeries.length > 1 ? (idx / (eqSeries.length - 1)) * eqPlotW : 0)
                     return (
-                      <text key={`eq-x-${idx}`} x={x} y={eqPad.top + eqPlotH + 13} textAnchor="middle" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">
+                      <text key={`eq-x-${idx}`} x={x} y={eqPad.top + eqPlotH + 22} textAnchor="middle" fontSize="9" fill="var(--text3)" fontFamily="monospace">
                         {formatDateTick(eqSeries[idx]?.date)}
                       </text>
                     )
@@ -646,73 +1065,119 @@ export default function Dashboard() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100px', color: 'var(--text3)', fontSize: '12px', fontFamily: 'monospace' }}>Log trades to see equity curve</div>
             )}
           </div>
-          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', minHeight: '280px' }}>
-            <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text)', marginBottom: '12px' }}>Net Daily P&L</div>
-            {dailyArr.length > 0 ? (
-              <div style={{ position: 'relative' }}>
-                {hoveredBar && (
-                  <div style={{ position: 'absolute', top: '8px', left: '10px', zIndex: 3, pointerEvents: 'none', background: 'rgba(0,0,0,0.85)', border: '1px solid var(--border-md)', borderRadius: '8px', padding: '8px 10px' }}>
-                    <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>{hoveredBar[0]}</div>
-                    <div style={{ fontSize: '12px', fontFamily: 'monospace', color: pnlColor(hoveredBar[1].pnl), marginTop: '2px' }}>PnL: {fmtPnl(hoveredBar[1].pnl)}</div>
-                    <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text2)' }}>{hoveredBar[1].count} trade{hoveredBar[1].count !== 1 ? 's' : ''}</div>
-                  </div>
-                )}
-                <svg
-                  width="100%"
-                  height="210"
-                  viewBox={`0 0 ${bW} ${bH}`}
-                  preserveAspectRatio="none"
-                  onMouseMove={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const rawX = ((e.clientX - rect.left) / rect.width) * bW
-                    const ratio = (rawX - bPad.left) / Math.max(bPlotW, 1)
-                    const idx = Math.max(0, Math.min(dailyArr.length - 1, Math.floor(ratio * dailyArr.length)))
-                    setHoveredBarIndex(idx)
-                  }}
-                  onMouseLeave={() => setHoveredBarIndex(null)}
-                >
-                  <line x1={bPad.left} y1={bPad.top + bPlotH} x2={bPad.left + bPlotW} y2={bPad.top + bPlotH} stroke="var(--border-md)" strokeWidth="0.8"/>
-                  <line x1={bPad.left} y1={bPad.top} x2={bPad.left} y2={bPad.top + bPlotH} stroke="var(--border-md)" strokeWidth="0.8"/>
-                  <line x1={bPad.left} y1={bMidY} x2={bPad.left + bPlotW} y2={bMidY} stroke="var(--border)" strokeWidth="0.8"/>
-                  <text x={bPad.left - 6} y={bPad.top + 3} textAnchor="end" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">{fmtAxisCurrency(dailyTop)}</text>
-                  <text x={bPad.left - 6} y={bMidY + 3} textAnchor="end" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">$0</text>
-                  <text x={bPad.left - 6} y={bPad.top + bPlotH + 3} textAnchor="end" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">{fmtAxisCurrency(dailyBottom)}</text>
-                  {dailyArr.map(([, val], i) => {
-                    const slotW = bPlotW / Math.max(dailyArr.length, 1)
-                    const x = bPad.left + i * slotW + (slotW - barW) / 2
-                    const bh = Math.max((Math.abs(val.pnl) / barMax) * (bPlotH / 2 - 4), 2)
-                    const isPos = val.pnl >= 0
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', minHeight: '200px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>Drawdown</div>
+              <div style={{ fontSize: '12px', fontFamily: 'monospace', fontWeight: 600, color: pnlColor(currentDrawdown) }}>{fmtPnl(currentDrawdown)} current</div>
+            </div>
+            {ddPath ? (
+              <div style={{ width: '100%', aspectRatio: `${ddW} / ${ddH}`, minHeight: '160px' }}>
+                <svg width="100%" height="100%" viewBox={`0 0 ${ddW} ${ddH}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
+                  <line x1={ddPad.left} y1={ddPad.top + ddPlotH} x2={ddPad.left + ddPlotW} y2={ddPad.top + ddPlotH} stroke="var(--border-md)" strokeWidth="0.8" />
+                  <path d={ddPath} fill="none" stroke="var(--loss)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  {ddTicksX.map((idx) => {
+                    const x = ddPad.left + (ddSeries.length > 1 ? (idx / (ddSeries.length - 1)) * ddPlotW : 0)
                     return (
-                      <rect
-                        key={i}
-                        x={x}
-                        y={isPos ? bMidY - bh : bMidY}
-                        width={barW}
-                        height={bh}
-                        rx="3"
-                        fill={isPos ? '#22C55E' : '#EF4444'}
-                        opacity={hoveredBarIndex === null || hoveredBarIndex === i ? 0.95 : 0.45}
-                      />
-                    )
-                  })}
-                  {dailyTicksX.map((idx) => {
-                    const x = bPad.left + (dailyArr.length > 1 ? (idx / (dailyArr.length - 1)) * bPlotW : 0)
-                    return (
-                      <text key={`daily-x-${idx}`} x={x} y={bPad.top + bPlotH + 13} textAnchor="middle" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">
-                        {formatDateTick(dailyArr[idx]?.[0])}
+                      <text key={`dd-x-${idx}`} x={x} y={ddPad.top + ddPlotH + 22} textAnchor="middle" fontSize="9" fill="var(--text3)" fontFamily="monospace">
+                        {formatDateTick(ddSeries[idx]?.date)}
                       </text>
                     )
                   })}
                 </svg>
               </div>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100px', color: 'var(--text3)', fontSize: '12px', fontFamily: 'monospace' }}>No data yet</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100px', color: 'var(--text3)', fontSize: '12px', fontFamily: 'monospace' }}>Need 2+ trades</div>
+            )}
+          </div>
+          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', minHeight: '200px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '8px' }}>Recent trade P&amp;L</div>
+            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginBottom: '10px' }}>Last {sparkPts.length} trades (filtered)</div>
+            {sparkPath ? (
+              <div>
+                <div style={{ width: '100%', aspectRatio: `${sparkW} / ${sparkH}`, minHeight: '100px' }}>
+                  <svg width="100%" height="100%" viewBox={`0 0 ${sparkW} ${sparkH}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
+                    <path d={sparkPath} fill="none" stroke={accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                {(sparkFirstDate || sparkLastDate) && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', paddingLeft: '2px', paddingRight: '2px', fontSize: '9px', fontFamily: 'monospace', color: 'var(--text3)' }}>
+                    <span>{formatDateTick(sparkFirstDate)}</span>
+                    <span>{formatDateTick(sparkLastDate)}</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '72px', color: 'var(--text3)', fontSize: '12px', fontFamily: 'monospace' }}>No trades</div>
             )}
           </div>
         </div>
 
+        <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', marginBottom: '20px' }}>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '12px' }}>Net daily P&amp;L</div>
+          {dailyArr.length > 0 ? (
+            <div style={{ position: 'relative' }}>
+              {hoveredBar && (
+                <div style={{ position: 'absolute', top: '8px', left: '10px', zIndex: 3, pointerEvents: 'none', background: 'rgba(0,0,0,0.85)', border: '1px solid var(--border-md)', borderRadius: '8px', padding: '8px 10px' }}>
+                  <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>{hoveredBar[0]}</div>
+                  <div style={{ fontSize: '12px', fontFamily: 'monospace', color: pnlColor(hoveredBar[1].pnl), marginTop: '2px' }}>PnL: {fmtPnl(hoveredBar[1].pnl)}</div>
+                  <div style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text2)' }}>{hoveredBar[1].count} trade{hoveredBar[1].count !== 1 ? 's' : ''}</div>
+                </div>
+              )}
+              <div style={{ width: '100%', aspectRatio: `${bW} / ${bH}`, minHeight: '180px' }}>
+              <svg
+                ref={barSvgRef}
+                width="100%"
+                height="100%"
+                viewBox={`0 0 ${bW} ${bH}`}
+                preserveAspectRatio="xMidYMid meet"
+                style={{ display: 'block' }}
+                onMouseMove={(e) => {
+                  const loc = clientPointToSvgXY(barSvgRef.current, e.clientX, e.clientY)
+                  if (!loc) return
+                  const ratio = (loc.x - bPad.left) / Math.max(bPlotW, 1)
+                  const idx = Math.max(0, Math.min(dailyArr.length - 1, Math.floor(ratio * dailyArr.length)))
+                  setHoveredBarIndex(idx)
+                }}
+                onMouseLeave={() => setHoveredBarIndex(null)}
+              >
+                <line x1={bPad.left} y1={bPad.top + bPlotH} x2={bPad.left + bPlotW} y2={bPad.top + bPlotH} stroke="var(--border-md)" strokeWidth="0.8"/>
+                <line x1={bPad.left} y1={bMidY} x2={bPad.left + bPlotW} y2={bMidY} stroke="var(--border)" strokeWidth="0.6" opacity="0.85"/>
+                {dailyArr.map(([, val], i) => {
+                  const slotW = bPlotW / Math.max(dailyArr.length, 1)
+                  const x = bPad.left + i * slotW + (slotW - barW) / 2
+                  const bh = Math.max((Math.abs(val.pnl) / barMax) * (bPlotH / 2 - 4), 2)
+                  const isPos = val.pnl >= 0
+                  return (
+                    <rect
+                      key={i}
+                      x={x}
+                      y={isPos ? bMidY - bh : bMidY}
+                      width={barW}
+                      height={bh}
+                      rx="3"
+                      fill={isPos ? '#22C55E' : '#EF4444'}
+                      opacity={hoveredBarIndex === null || hoveredBarIndex === i ? 0.95 : 0.45}
+                    />
+                  )
+                })}
+                {dailyTicksX.map((idx) => {
+                  const x = bPad.left + (dailyArr.length > 1 ? (idx / (dailyArr.length - 1)) * bPlotW : 0)
+                  return (
+                    <text key={`daily-x-${idx}`} x={x} y={bPad.top + bPlotH + 22} textAnchor="middle" fontSize="9" fill="var(--text3)" fontFamily="monospace">
+                      {formatDateTick(dailyArr[idx]?.[0])}
+                    </text>
+                  )
+                })}
+              </svg>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100px', color: 'var(--text3)', fontSize: '12px', fontFamily: 'monospace' }}>No data yet</div>
+          )}
+        </div>
+
         {/* Calendar */}
-        <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px' }}>
+        <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))}
