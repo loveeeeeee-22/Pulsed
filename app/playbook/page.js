@@ -59,7 +59,7 @@ function categoryFromRules(rules) {
 }
 
 function consistencyScore(pnls) {
-  if (!pnls || pnls.length < 3) return 0;
+  if (!pnls || pnls.length < 2) return 0;
   const n = pnls.length;
   const mean = pnls.reduce((a, b) => a + b, 0) / n;
   const variance = pnls.reduce((s, x) => s + (x - mean) ** 2, 0) / Math.max(n - 1, 1);
@@ -127,13 +127,61 @@ function buildStrategyRow(strategy, trades) {
   };
 }
 
+/** Primary sort value (higher = better). Playbooks with too few trades sort last for WR / PF / consistency. */
+function sortPrimary(row, key) {
+  if (key === "pnl") return row.netPnl;
+  if (key === "wr") return row.tradeCount > 0 ? row.winRate : -1;
+  if (key === "pf") {
+    if (row.tradeCount === 0) return -1;
+    if (row.grossLossAbs > 0) return row.profitFactor;
+    if (row.grossWin > 0) return 1e9 + row.tradeCount * 1e-3 + row.grossWin * 1e-6;
+    return -1;
+  }
+  if (key === "consistency") return row.tradeCount >= 2 ? row.consistency : -1;
+  return 0;
+}
+
 function sortRows(rows, key) {
   const copy = [...rows];
-  if (key === "pnl") copy.sort((a, b) => b.netPnl - a.netPnl);
-  else if (key === "wr") copy.sort((a, b) => b.winRate - a.winRate);
-  else if (key === "pf") copy.sort((a, b) => b.profitFactor - a.profitFactor);
-  else if (key === "consistency") copy.sort((a, b) => b.consistency - a.consistency);
+  copy.sort((a, b) => {
+    const pa = sortPrimary(a, key);
+    const pb = sortPrimary(b, key);
+    if (pb !== pa) return pb - pa;
+    if (b.tradeCount !== a.tradeCount) return b.tradeCount - a.tradeCount;
+    return b.netPnl - a.netPnl;
+  });
   return copy;
+}
+
+/** Bar width % and label for Top playbooks row — matches active tab metric */
+function topRowMetric(row, topSort, scales) {
+  if (topSort === "pnl") {
+    const barW = scales.maxAbsPnl > 0 ? (Math.abs(row.netPnl) / scales.maxAbsPnl) * 100 : 0;
+    return {
+      barW,
+      text: fmtCurrencyFull(row.netPnl),
+      color: row.netPnl >= 0 ? TS.mint : "#F87171",
+    };
+  }
+  if (topSort === "wr") {
+    if (row.tradeCount === 0) return { barW: 0, text: "—", color: TS.textDim };
+    const barW = scales.maxWr > 0 ? (row.winRate / scales.maxWr) * 100 : 0;
+    return { barW, text: `${row.winRate.toFixed(1)}%`, color: TS.text };
+  }
+  if (topSort === "pf") {
+    if (row.tradeCount === 0) return { barW: 0, text: "—", color: TS.textDim };
+    if (row.grossLossAbs <= 0) {
+      if (row.grossWin > 0) return { barW: 100, text: "∞", color: TS.mint };
+      return { barW: 0, text: "—", color: TS.textDim };
+    }
+    const cap = 4;
+    const capped = Math.min(row.profitFactor, cap);
+    const barW = scales.maxPfBar > 0 ? (capped / scales.maxPfBar) * 100 : 0;
+    return { barW, text: row.profitFactor.toFixed(2), color: TS.mint };
+  }
+  if (row.tradeCount < 2) return { barW: 0, text: "—", color: TS.textDim };
+  const barW = scales.maxCons > 0 ? (row.consistency / scales.maxCons) * 100 : 0;
+  return { barW, text: `${Math.round(row.consistency)}`, color: TS.text };
 }
 
 export default function PlaybookPage() {
@@ -238,10 +286,22 @@ export default function PlaybookPage() {
     return { total, active, totalPnl, bestWrPct: bestWr ? bestWr.winRate : null, bestWrName, bestPfVal: bestPf ? bestPf.profitFactor : null, bestPfName };
   }, [rows]);
 
-  const maxTopPnl = useMemo(() => {
-    const vals = sortedForTop.map((r) => r.netPnl);
-    return Math.max(...vals.map((v) => Math.abs(v)), 1);
-  }, [sortedForTop]);
+  /** Scale bars in Top playbooks to filtered set (same rows as sort source) */
+  const topBarScales = useMemo(() => {
+    let maxAbsPnl = 1;
+    let maxWr = 1;
+    let maxPfBar = 1;
+    let maxCons = 1;
+    for (const r of filtered) {
+      maxAbsPnl = Math.max(maxAbsPnl, Math.abs(r.netPnl));
+      if (r.tradeCount > 0) maxWr = Math.max(maxWr, r.winRate);
+      if (r.tradeCount > 0 && r.grossLossAbs > 0) maxPfBar = Math.max(maxPfBar, Math.min(r.profitFactor, 4));
+      if (r.tradeCount >= 2) maxCons = Math.max(maxCons, r.consistency);
+    }
+    if (maxPfBar < 1e-6) maxPfBar = 1;
+    if (maxCons < 1e-6) maxCons = 1;
+    return { maxAbsPnl, maxWr, maxPfBar, maxCons };
+  }, [filtered]);
 
   const selectStyle = {
     background: TS.card,
@@ -484,7 +544,8 @@ export default function PlaybookPage() {
           ) : (
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
               {sortedForTop.slice(0, 8).map((row, i) => {
-                const barW = maxTopPnl > 0 ? (Math.abs(row.netPnl) / maxTopPnl) * 100 : 0;
+                const m = topRowMetric(row, topSort, topBarScales);
+                const barColor = topSort === "pnl" ? TS.orange : TS.mint;
                 return (
                   <li
                     key={row.id}
@@ -521,11 +582,34 @@ export default function PlaybookPage() {
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ height: "6px", background: "rgba(255,255,255,0.06)", borderRadius: "4px", overflow: "hidden" }}>
-                        <div style={{ width: `${barW}%`, height: "100%", background: TS.orange, borderRadius: "4px", minWidth: row.netPnl !== 0 ? "4px" : 0 }} />
+                        <div
+                          style={{
+                            width: `${m.barW}%`,
+                            height: "100%",
+                            background: barColor,
+                            borderRadius: "4px",
+                            minWidth: m.barW > 0 ? "4px" : 0,
+                          }}
+                        />
                       </div>
                     </div>
-                    <div style={{ fontSize: "14px", fontWeight: 600, color: row.netPnl >= 0 ? TS.mint : "#F87171", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-                      {fmtCurrencyFull(row.netPnl)}
+                    <div
+                      style={{
+                        fontSize: "14px",
+                        fontWeight: 600,
+                        color: m.color,
+                        fontVariantNumeric: "tabular-nums",
+                        whiteSpace: "nowrap",
+                        textAlign: "right",
+                      }}
+                      title={
+                        topSort === "consistency"
+                          ? "Consistency: mean trade P&L ÷ volatility (higher = steadier)"
+                          : undefined
+                      }
+                    >
+                      {m.text}
+                      {topSort === "consistency" && row.tradeCount >= 2 ? <span style={{ fontWeight: 500, color: TS.textDim, fontSize: "11px" }}> pts</span> : null}
                     </div>
                   </li>
                 );
