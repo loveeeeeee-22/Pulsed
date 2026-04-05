@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getAccountsForUser } from "@/lib/getAccountsForUser";
 import { getStrategiesForUser } from "@/lib/getStrategiesForUser";
+import { computeActualRMultiple } from "@/lib/computeActualRMultiple";
 import EditTradeModal from "@/components/EditTradeModal";
 
 function parseNumber(value) {
@@ -176,6 +177,11 @@ export default function NewTradePage() {
     return profitTarget / stopLoss;
   }, [profitTarget, stopLoss]);
 
+  const computedActualRr = useMemo(
+    () => computeActualRMultiple(netPnl, parseNumber(form.trade_risk)),
+    [netPnl, form.trade_risk]
+  );
+
   const selectedAccountForLabels = accounts.find(a => a.id === form.account_id)
   const accountTypeForLabels = String(selectedAccountForLabels?.type || '').toLowerCase()
   const contractsLabel = accountTypeForLabels === 'forex' ? 'Lots' : 'Contracts'
@@ -232,7 +238,7 @@ export default function NewTradePage() {
       stop_loss: stopLoss,
       trade_risk: parseNumber(form.trade_risk),
       planned_rr: plannedRr,
-      actual_rr: parseNumber(form.actual_rr),
+      actual_rr: computedActualRr ?? parseNumber(form.actual_rr),
       status: form.status.trim() || null,
       notes: form.notes.trim() || null,
       mistakes: computedMistakes,
@@ -309,8 +315,8 @@ export default function NewTradePage() {
                 New trade
               </h1>
               <p style={{ margin: "8px 0 0", maxWidth: "620px", fontSize: "13px", color: "var(--text3)" }}>
-                Log execution, risk, and review fields. Net P&amp;L and planned R:R
-                update as you type.
+                Log execution, risk, and review fields. Net P&amp;L, planned R:R, and actual R
+                (net P&amp;L ÷ trade risk $) update as you type when risk is set.
               </p>
             </div>
             <button
@@ -701,17 +707,38 @@ export default function NewTradePage() {
                 </div>
               </div>
               <div>
-                <label style={labelStyle} htmlFor="actual_rr">
-                  Actual R:R
+                <label style={labelStyle} htmlFor={computedActualRr != null ? undefined : "actual_rr"}>
+                  {computedActualRr != null ? "Actual R (auto)" : "Actual R:R"}
                 </label>
-                <input
-                  id="actual_rr"
-                  type="number"
-                  step="any"
-                  style={inputStyle}
-                  value={form.actual_rr}
-                  onChange={(e) => updateField("actual_rr", e.target.value)}
-                />
+                {computedActualRr != null ? (
+                  <div
+                    style={{
+                      ...inputStyle,
+                      display: "flex",
+                      alignItems: "center",
+                      color: "var(--text2)",
+                      fontFamily: "monospace",
+                    }}
+                    aria-live="polite"
+                  >
+                    {formatNum(computedActualRr)}R
+                  </div>
+                ) : (
+                  <input
+                    id="actual_rr"
+                    type="number"
+                    step="any"
+                    style={inputStyle}
+                    value={form.actual_rr}
+                    onChange={(e) => updateField("actual_rr", e.target.value)}
+                    placeholder="Or set trade risk ($) for auto"
+                  />
+                )}
+                <div style={{ fontSize: "10px", color: "var(--text3)", marginTop: "6px", lineHeight: 1.4 }}>
+                  {computedActualRr != null
+                    ? "Net P&L ÷ trade risk ($)."
+                    : "Enter R manually, or fill trade risk ($) and net P&L to calculate automatically."}
+                </div>
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
                 <span style={labelStyle}>Planned R:R (auto)</span>

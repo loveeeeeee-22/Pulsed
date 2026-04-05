@@ -180,10 +180,14 @@ export default function Dashboard() {
   const [noteText, setNoteText] = useState('')
   const [journalEntries, setJournalEntries] = useState([])
   const [hoveredEqIndex, setHoveredEqIndex] = useState(null)
+  const [hoveredDdIndex, setHoveredDdIndex] = useState(null)
+  const [hoveredSparkIndex, setHoveredSparkIndex] = useState(null)
   const [now, setNow] = useState(new Date())
   const [dashUsername, setDashUsername] = useState('')
   const noteRef = useRef(null)
   const eqSvgRef = useRef(null)
+  const ddSvgRef = useRef(null)
+  const sparkSvgRef = useRef(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [sessionUser, setSessionUser] = useState(null)
   const [strategies, setStrategies] = useState([])
@@ -617,6 +621,29 @@ export default function Dashboard() {
   const greenLine = '#22C55E'
   const hoveredEq = hoveredEqIndex !== null ? eqSeries[hoveredEqIndex] : null
   const hoveredEqCoord = hoveredEqIndex !== null ? eqCoords[hoveredEqIndex] : null
+
+  const hoveredDdDetail =
+    hoveredDdIndex !== null &&
+    hoveredDdIndex < ddSeries.length &&
+    hoveredDdIndex < eqSeries.length
+      ? {
+          date: eqSeries[hoveredDdIndex]?.date,
+          dd: ddSeries[hoveredDdIndex]?.dd,
+          cumPnl: eqSeries[hoveredDdIndex]?.cumPnl,
+        }
+      : null
+  const hoveredDdCoord = hoveredDdIndex !== null ? ddCoords[hoveredDdIndex] : null
+
+  const hoveredSparkDetail =
+    hoveredSparkIndex !== null &&
+    hoveredSparkIndex < sparkTrades.length &&
+    hoveredSparkIndex < sparkPts.length
+      ? {
+          date: sparkTrades[hoveredSparkIndex]?.date?.slice(0, 10),
+          pnl: sparkPts[hoveredSparkIndex],
+        }
+      : null
+  const hoveredSparkCoord = hoveredSparkIndex !== null ? sparkCoords[hoveredSparkIndex] : null
 
   // Day detail data
   const dayTrades = selectedDay ? (dailyMap[selectedDay]?.trades || []) : []
@@ -1107,8 +1134,30 @@ export default function Dashboard() {
               <MiniChartIcon />
             </div>
             {ddLinePath ? (
-              <div style={{ width: '100%', aspectRatio: `${ddW} / ${ddH}`, minHeight: '150px' }}>
-                <svg width="100%" height="100%" viewBox={`0 0 ${ddW} ${ddH}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
+              <div style={{ position: 'relative', width: '100%', aspectRatio: `${ddW} / ${ddH}`, minHeight: '150px' }}>
+                {hoveredDdDetail && (
+                  <div style={{ position: 'absolute', top: '4px', left: '4px', zIndex: 3, pointerEvents: 'none', background: 'rgba(0,0,0,0.85)', border: '1px solid var(--border-md)', borderRadius: '8px', padding: '8px 10px' }}>
+                    <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>{hoveredDdDetail.date || 'No date'}</div>
+                    <div style={{ fontSize: '12px', fontFamily: 'monospace', color: pnlColor(hoveredDdDetail.dd), marginTop: '2px' }}>Drawdown: {fmtPnl(hoveredDdDetail.dd)}</div>
+                    <div style={{ fontSize: '12px', fontFamily: 'monospace', color: pnlColor(hoveredDdDetail.cumPnl), marginTop: '2px' }}>Cumulative: {fmtPnl(hoveredDdDetail.cumPnl)}</div>
+                  </div>
+                )}
+                <svg
+                  ref={ddSvgRef}
+                  width="100%"
+                  height="100%"
+                  viewBox={`0 0 ${ddW} ${ddH}`}
+                  preserveAspectRatio="xMidYMid meet"
+                  style={{ display: 'block' }}
+                  onMouseMove={(e) => {
+                    const loc = clientPointToSvgXY(ddSvgRef.current, e.clientX, e.clientY)
+                    if (!loc || ddSeries.length < 2) return
+                    const ratio = (loc.x - ddPad.left) / Math.max(ddPlotW, 1)
+                    const idx = Math.max(0, Math.min(ddSeries.length - 1, Math.round(ratio * (ddSeries.length - 1))))
+                    setHoveredDdIndex(idx)
+                  }}
+                  onMouseLeave={() => setHoveredDdIndex(null)}
+                >
                   <defs>
                     <linearGradient id="dash-dd-fill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#EF4444" stopOpacity="0.22" />
@@ -1125,6 +1174,12 @@ export default function Dashboard() {
                       </text>
                     )
                   })}
+                  {hoveredDdCoord && (
+                    <>
+                      <line x1={hoveredDdCoord.x} y1={ddPad.top} x2={hoveredDdCoord.x} y2={ddPad.top + ddPlotH} stroke="#EF4444" strokeOpacity="0.4" strokeDasharray="3 3" />
+                      <circle cx={hoveredDdCoord.x} cy={hoveredDdCoord.y} r="4" fill="#EF4444" stroke="var(--card-bg)" strokeWidth="1.5" />
+                    </>
+                  )}
                 </svg>
               </div>
             ) : (
@@ -1141,8 +1196,29 @@ export default function Dashboard() {
               <MiniChartIcon />
             </div>
             {sparkLinePath ? (
-              <div style={{ width: '100%', aspectRatio: `${sparkW} / ${sparkH}`, minHeight: '140px' }}>
-                <svg width="100%" height="100%" viewBox={`0 0 ${sparkW} ${sparkH}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
+              <div style={{ position: 'relative', width: '100%', aspectRatio: `${sparkW} / ${sparkH}`, minHeight: '140px' }}>
+                {hoveredSparkDetail && (
+                  <div style={{ position: 'absolute', top: '4px', left: '4px', zIndex: 3, pointerEvents: 'none', background: 'rgba(0,0,0,0.85)', border: '1px solid var(--border-md)', borderRadius: '8px', padding: '8px 10px' }}>
+                    <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>{hoveredSparkDetail.date || 'No date'}</div>
+                    <div style={{ fontSize: '12px', fontFamily: 'monospace', color: pnlColor(hoveredSparkDetail.pnl), marginTop: '2px' }}>Trade: {fmtPnl(hoveredSparkDetail.pnl)}</div>
+                  </div>
+                )}
+                <svg
+                  ref={sparkSvgRef}
+                  width="100%"
+                  height="100%"
+                  viewBox={`0 0 ${sparkW} ${sparkH}`}
+                  preserveAspectRatio="xMidYMid meet"
+                  style={{ display: 'block' }}
+                  onMouseMove={(e) => {
+                    const loc = clientPointToSvgXY(sparkSvgRef.current, e.clientX, e.clientY)
+                    if (!loc || sparkPts.length < 1) return
+                    const ratio = (loc.x - sparkPad.left) / Math.max(sparkPlotW, 1)
+                    const idx = Math.max(0, Math.min(sparkPts.length - 1, Math.round(ratio * (sparkPts.length - 1))))
+                    setHoveredSparkIndex(idx)
+                  }}
+                  onMouseLeave={() => setHoveredSparkIndex(null)}
+                >
                   <defs>
                     <linearGradient id="dash-spark-fill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor={greenLine} stopOpacity="0.26" />
@@ -1159,6 +1235,12 @@ export default function Dashboard() {
                       </text>
                     )
                   })}
+                  {hoveredSparkCoord && (
+                    <>
+                      <line x1={hoveredSparkCoord.x} y1={sparkPad.top} x2={hoveredSparkCoord.x} y2={sparkPad.top + sparkPlotH} stroke={greenLine} strokeOpacity="0.35" strokeDasharray="3 3" />
+                      <circle cx={hoveredSparkCoord.x} cy={hoveredSparkCoord.y} r="4" fill={greenLine} stroke="var(--card-bg)" strokeWidth="1.5" />
+                    </>
+                  )}
                 </svg>
               </div>
             ) : (

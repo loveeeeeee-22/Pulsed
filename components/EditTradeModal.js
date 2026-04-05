@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { getAccountsForUser } from '@/lib/getAccountsForUser'
 import { getStrategiesForUser } from '@/lib/getStrategiesForUser'
+import { computeActualRMultiple } from '@/lib/computeActualRMultiple'
 
 const SESSION_OPTIONS = ['New York', 'London', 'Asian']
 
@@ -166,6 +167,11 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
     return (gross ?? 0) - (fees ?? 0)
   }, [gross, fees])
 
+  const computedActualRr = useMemo(
+    () => computeActualRMultiple(netPnl, parseNumber(form.trade_risk)),
+    [netPnl, form.trade_risk]
+  )
+
   useEffect(() => {
     if (!trade) return
     setForm({
@@ -288,7 +294,7 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
         stop_loss: parseNumber(form.stop_loss),
         trade_risk: parseNumber(form.trade_risk),
         planned_rr: plannedRr,
-        actual_rr: parseNumber(form.actual_rr),
+        actual_rr: computedActualRr ?? parseNumber(form.actual_rr),
         status: form.status || null,
         notes: form.notes?.trim() || null,
         trade_grade: form.trade_grade?.trim() || null,
@@ -599,8 +605,35 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
                 </div>
               </div>
               <div>
-                <label style={labelStyle}>Actual R:R</label>
-                <input type="number" step="any" style={inputStyle} value={form.actual_rr} onChange={e => setForm(f => ({ ...f, actual_rr: e.target.value }))} />
+                <label style={labelStyle}>{computedActualRr != null ? 'Actual R (auto)' : 'Actual R:R'}</label>
+                {computedActualRr != null ? (
+                  <div
+                    style={{
+                      ...inputStyle,
+                      display: 'flex',
+                      alignItems: 'center',
+                      color: 'var(--text2)',
+                      fontFamily: 'monospace',
+                    }}
+                    aria-live="polite"
+                  >
+                    {formatNum(computedActualRr)}R
+                  </div>
+                ) : (
+                  <input
+                    type="number"
+                    step="any"
+                    style={inputStyle}
+                    value={form.actual_rr}
+                    onChange={e => setForm(f => ({ ...f, actual_rr: e.target.value }))}
+                    placeholder="Or set trade risk ($) for auto"
+                  />
+                )}
+                <div style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '6px', lineHeight: 1.4 }}>
+                  {computedActualRr != null
+                    ? 'Net P&L ÷ trade risk ($). Updates when P&L or risk changes.'
+                    : 'Enter R manually, or fill trade risk ($) and net P&L to calculate automatically.'}
+                </div>
               </div>
 
               <div style={{ gridColumn: '1 / -1' }}>
