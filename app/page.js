@@ -393,16 +393,14 @@ export default function Dashboard() {
     ? durationSamples.reduce((a, b) => a + b, 0) / durationSamples.length
     : null
 
-  const reviewedRatio = filtered.length ? filtered.filter(isTradeReviewed).length / filtered.length : 0
   const pfNum = profitFactor === '∞' ? 3 : parseFloat(profitFactor) || 0
   const wrNum = parseFloat(winRate) || 0
   const arNum = avgRatio === '—' ? 0 : parseFloat(avgRatio) || 0
+  /** Each axis 0–100: R:R and PF capped at 3 → full bar */
   const radarVals = [
     Math.min(Math.max(wrNum, 0), 100),
-    Math.min(Math.max((pfNum / 3) * 100, 0), 100),
-    Math.min(Math.max(reviewedRatio * 100, 0), 100),
     Math.min(Math.max((arNum / 3) * 100, 0), 100),
-    Math.min(Math.max((filtered.length / 40) * 100, 0), 100),
+    Math.min(Math.max((pfNum / 3) * 100, 0), 100),
   ]
   const pulsedScore = Math.round(radarVals.reduce((a, b) => a + b, 0) / radarVals.length)
 
@@ -558,8 +556,8 @@ export default function Dashboard() {
   }
   const sparkTicksX = buildIndexTicks(sparkTrades.length, 6)
 
-  // Radar chart (5 axes, normalized 0–100)
-  const radarLabels = ['Win %', 'Profit x', 'Reviewed', 'W/L x', 'Volume']
+  // Radar chart (3 axes, normalized 0–100)
+  const radarLabels = ['Win %', 'R:R', 'Profit factor']
   const radarR = 52
   const radarCx = 70
   const radarCy = 70
@@ -1006,7 +1004,7 @@ export default function Dashboard() {
               <div style={{ fontSize: '18px', fontFamily: 'monospace', fontWeight: 700, color: accent }}>{pulsedScore}</div>
             </div>
             <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginBottom: '10px', lineHeight: 1.4 }}>
-              Blend of win rate, profit factor, review coverage, payoff ratio, and sample size (heuristic).
+              Win rate, risk/reward (avg win ÷ avg loss), and profit factor. R:R and PF are scored vs a 3× reference (heuristic).
             </div>
             <svg width="100%" height="200" viewBox="0 0 140 140" style={{ display: 'block', margin: '0 auto', maxWidth: '200px' }}>
               {[0.25, 0.5, 0.75, 1].map((t) => (
