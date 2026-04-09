@@ -194,6 +194,7 @@ export default function Dashboard() {
   const [journalFilter, setJournalFilter] = useState('all')
   const [timeRange, setTimeRange] = useState('all')
   const [strategyFilter, setStrategyFilter] = useState('all')
+  const [hideReviewedBanner, setHideReviewedBanner] = useState(false)
 
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', '#7C3AED')
@@ -384,6 +385,10 @@ export default function Dashboard() {
   const todayWins = todayTrades.filter(t => t.status === 'Win')
   const dayWinRate = todayTrades.length ? ((todayWins.length / todayTrades.length) * 100).toFixed(0) : '0'
   const pendingReviewCount = countTradesNeedingReview(filtered)
+
+  useEffect(() => {
+    if (pendingReviewCount > 0) setHideReviewedBanner(false)
+  }, [pendingReviewCount])
 
   const longTrades = filtered.filter(t => directionIsLong(t.direction))
   const shortTrades = filtered.filter(t => directionIsShort(t.direction))
@@ -922,7 +927,7 @@ export default function Dashboard() {
               Open trade log
             </Link>
           </div>
-        ) : filtered.length > 0 ? (
+        ) : filtered.length > 0 && !hideReviewedBanner ? (
           <div
             style={{
               marginBottom: '16px',
@@ -941,21 +946,41 @@ export default function Dashboard() {
               <strong style={{ color: '#22C55E' }}>All trades reviewed</strong>
               {selectedAccount !== 'all' ? ' (current account filter)' : ''} — great work.
             </span>
-            <Link
-              href="/trade-log"
-              style={{
-                fontSize: '12px',
-                fontFamily: 'monospace',
-                fontWeight: 700,
-                color: '#fff',
-                background: accent,
-                padding: '8px 14px',
-                borderRadius: '8px',
-                textDecoration: 'none',
-              }}
-            >
-              Trade log
-            </Link>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Link
+                href="/trade-log"
+                style={{
+                  fontSize: '12px',
+                  fontFamily: 'monospace',
+                  fontWeight: 700,
+                  color: '#fff',
+                  background: accent,
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  textDecoration: 'none',
+                }}
+              >
+                Trade log
+              </Link>
+              <button
+                type="button"
+                onClick={() => setHideReviewedBanner(true)}
+                aria-label="Dismiss all reviewed message"
+                style={{
+                  fontSize: '12px',
+                  fontFamily: 'monospace',
+                  fontWeight: 700,
+                  color: 'var(--text2)',
+                  background: 'var(--bg3)',
+                  border: '1px solid var(--border-md)',
+                  padding: '8px 10px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         ) : null}
 
