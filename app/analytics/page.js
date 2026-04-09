@@ -1,895 +1,558 @@
 'use client'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+
+import { useEffect, useMemo, useState } from 'react'
 import { getAccountsForUser } from '@/lib/getAccountsForUser'
 import { getTradesForUser } from '@/lib/getTradesForUser'
 
-const GREEN = '#22C55E'
-const RED = '#EF4444'
+const PROFIT_COLOR = '#22C55E'
+const LOSS_COLOR = '#EF4444'
+
+const DATE_RANGES = [
+  { id: '7d', label: 'Last 7 days' },
+  { id: '30d', label: 'Last 30 days' },
+  { id: '90d', label: 'Last 90 days' },
+  { id: 'month', label: 'This month' },
+  { id: 'all', label: 'All time' },
+]
+
+const GROUPING_OPTIONS = ['day', 'week', 'month']
+
+const METRICS = [
+  { id: 'net_pnl', label: 'Net P&L', kind: 'currency' },
+  { id: 'gross_pnl', label: 'Gross P&L', kind: 'currency' },
+  { id: 'win_rate', label: 'Win Rate', kind: 'ratio' },
+  { id: 'profit_factor', label: 'Profit Factor', kind: 'number' },
+  { id: 'trade_count', label: 'Trade Count', kind: 'number' },
+]
+
+const SESSIONS = ['London', 'New York', 'Asian']
 
 function asNum(v) {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
 }
 
-function fmtPnl(n) {
-  const v = Number(n || 0)
-  const sign = v >= 0 ? '+$' : '-$'
-  return sign + Math.abs(v).toFixed(2)
+function fmtCurrency(v, withSign = true) {
+  const n = asNum(v)
+  const abs = Math.abs(n)
+  const head = withSign ? (n >= 0 ? '+' : '-') : ''
+  return `${head}$${abs.toFixed(2)}`
 }
 
-function pnlColor(n) {
-  return asNum(n) >= 0 ? GREEN : RED
+function fmtPercent(v, decimals = 1) {
+  return `${(asNum(v) * 100).toFixed(decimals)}%`
 }
 
-function fmtPct(n) {
-  return `${Number(n).toFixed(1)}%`
-}
-
-function fmtAxisCurrency(n) {
-  const v = Number(n || 0)
-  const abs = Math.abs(v)
-  if (abs >= 1000) return `${v < 0 ? '-' : ''}$${(abs / 1000).toFixed(1)}k`
-  return `${v < 0 ? '-' : ''}$${abs.toFixed(0)}`
-}
-
-function formatDateTick(dateStr) {
-  if (!dateStr) return ''
+function fmtDay(dateStr) {
+  if (!dateStr) return '—'
   const d = new Date(`${String(dateStr).slice(0, 10)}T12:00:00`)
-  if (Number.isNaN(d.getTime())) return String(dateStr).slice(5)
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  const yy = String(d.getFullYear()).slice(-2)
-  return `${mm}/${dd}/${yy}`
+  if (Number.isNaN(d.getTime())) return dateStr
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-function buildLinearTicks(minV, maxV, count = 5) {
-  if (!Number.isFinite(minV) || !Number.isFinite(maxV)) return [0]
-  if (Math.abs(maxV - minV) < 1e-9) return [minV]
-  return Array.from({ length: count }, (_, i) => minV + ((maxV - minV) * i) / (count - 1))
+function fmtDayLong(dateStr) {
+  if (!dateStr) return '—'
+  const d = new Date(`${String(dateStr).slice(0, 10)}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return dateStr
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function buildIndexTicks(length, count = 4) {
-  if (!length) return []
-  if (length === 1) return [0]
-  const idx = new Set([0, length - 1])
-  for (let i = 1; i < count - 1; i += 1) idx.add(Math.round((i / (count - 1)) * (length - 1)))
-  return Array.from(idx).sort((a, b) => a - b)
+function rangeStart(rangeId) {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  if (rangeId === 'all') return null
+  if (rangeId === 'month') return new Date(today.getFullYear(), today.getMonth(), 1)
+  if (rangeId === '7d') return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)
+  if (rangeId === '30d') return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29)
+  if (rangeId === '90d') return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 89)
+  return null
+}
+
+function weekStart(dateObj) {
+  const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate())
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diff)
+  return d
+}
+
+function yTicks(min, max, count = 5) {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return [0]
+  if (Math.abs(max - min) < 1e-9) return [min]
+  return Array.from({ length: count }, (_, i) => min + ((max - min) * i) / (count - 1))
+}
+
+function formatAxisValue(v, metricId) {
+  const metric = METRICS.find(m => m.id === metricId)
+  if (!metric) return String(v)
+  if (metric.kind === 'currency') {
+    const n = asNum(v)
+    const abs = Math.abs(n)
+    if (abs >= 1000) return `${n < 0 ? '-' : ''}$${(abs / 1000).toFixed(1)}k`
+    return `${n < 0 ? '-' : ''}$${abs.toFixed(0)}`
+  }
+  if (metric.kind === 'ratio') return asNum(v).toFixed(2)
+  return asNum(v).toFixed(1)
+}
+
+function calcMetric(bucket, metricId) {
+  if (metricId === 'net_pnl') return bucket.net
+  if (metricId === 'gross_pnl') return bucket.gross
+  if (metricId === 'win_rate') return bucket.trades ? bucket.wins / bucket.trades : 0
+  if (metricId === 'profit_factor') {
+    const grossLoss = Math.abs(bucket.lossGross)
+    if (grossLoss <= 0) return bucket.winGross > 0 ? bucket.winGross : 0
+    return bucket.winGross / grossLoss
+  }
+  if (metricId === 'trade_count') return bucket.trades
+  return 0
+}
+
+function buildInsightOverall(stats) {
+  const { totalPnl, expectancy, profitFactor, winRate } = stats
+  if (totalPnl > 0 && expectancy > 0 && profitFactor >= 1) {
+    return 'Your trading results show a solid profit with consistent trade expectancy.'
+  }
+  if (totalPnl < 0 && expectancy < 0) {
+    return 'Results are currently under pressure; tightening risk and improving setup quality could help.'
+  }
+  if (winRate >= 0.5) {
+    return 'You are maintaining a healthy win rate, but average outcome per trade can still improve.'
+  }
+  return 'Performance is mixed; focus on execution consistency to stabilize outcomes.'
+}
+
+function buildInsightOutcomes(stats) {
+  const { wins, losses, maxWinStreak, maxLossStreak, largestProfit, largestLoss } = stats
+  if (wins > losses && maxWinStreak >= maxLossStreak) {
+    return 'Winning pressure is stronger than losing pressure, with favorable streak behavior.'
+  }
+  if (losses > wins && Math.abs(largestLoss) > Math.abs(largestProfit)) {
+    return 'Losses are dominating outcomes; consider tighter stop discipline and position sizing.'
+  }
+  return 'Outcome distribution is balanced, so consistency in risk management is the key edge.'
+}
+
+function buildInsightActivity(stats) {
+  const { tradingDays, loggedDays, bestSession, bestSymbol } = stats
+  if (tradingDays > 0 && loggedDays / tradingDays >= 0.8) {
+    return `Great logging consistency. ${bestSession} session and ${bestSymbol} are currently your strongest contributors.`
+  }
+  if (tradingDays > 0 && loggedDays / tradingDays < 0.5) {
+    return 'Journaling coverage is low; logging more sessions should reveal clearer performance patterns.'
+  }
+  return `Activity data suggests your edge is concentrating around ${bestSession} and ${bestSymbol}.`
 }
 
 export default function AnalyticsPage() {
   const [trades, setTrades] = useState([])
   const [accounts, setAccounts] = useState([])
   const [selectedAccount, setSelectedAccount] = useState('all')
+  const [selectedRange, setSelectedRange] = useState('30d')
+  const [grouping, setGrouping] = useState('day')
+  const [leftMetric, setLeftMetric] = useState('net_pnl')
+  const [rightMetric, setRightMetric] = useState('win_rate')
+  const [chartType, setChartType] = useState('line')
   const [loading, setLoading] = useState(true)
-  const [hoverPoint, setHoverPoint] = useState(null)
-  const [hoverDailyIndex, setHoverDailyIndex] = useState(null)
-  const svgRef = useRef(null)
-
-  const [tier, setTier] = useState('basic') // 'basic' | 'advanced'
   const [accent, setAccent] = useState('#7C3AED')
 
   useEffect(() => {
     const lsAccent = typeof window !== 'undefined' ? window.localStorage.getItem('accentColor') : null
-    const nextAccent = lsAccent || '#7C3AED'
-    setAccent(nextAccent)
-    document.documentElement.style.setProperty('--accent', nextAccent)
+    setAccent(lsAccent || '#7C3AED')
   }, [])
 
   useEffect(() => {
-    fetchAccounts()
-    fetchTrades()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    async function load() {
+      setLoading(true)
+      const [accountRows, tradeRows] = await Promise.all([getAccountsForUser(), getTradesForUser({ orderAscending: true })])
+      setAccounts(accountRows || [])
+      setTrades(tradeRows || [])
+      setLoading(false)
+    }
+    load()
   }, [])
 
-  async function fetchAccounts() {
-    const data = await getAccountsForUser()
-    setAccounts(data)
-  }
+  const filteredTrades = useMemo(() => {
+    const start = rangeStart(selectedRange)
+    return trades
+      .filter(t => selectedAccount === 'all' || t.account_id === selectedAccount)
+      .filter(t => {
+        if (!start) return true
+        const d = new Date(`${String(t.date || '').slice(0, 10)}T00:00:00`)
+        if (Number.isNaN(d.getTime())) return false
+        return d >= start
+      })
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
+  }, [trades, selectedAccount, selectedRange])
 
-  async function fetchTrades() {
-    setLoading(true)
-    const data = await getTradesForUser({ orderAscending: true })
-    setTrades(data)
-    setLoading(false)
-  }
-
-  const filtered = useMemo(() => {
-    return trades.filter(t => selectedAccount === 'all' || t.account_id === selectedAccount)
-  }, [trades, selectedAccount])
-
-  const filteredSorted = useMemo(() => {
-    return [...filtered].sort((a, b) => (a.date || '').localeCompare(b.date || ''))
-  }, [filtered])
-
-  const wins = useMemo(() => filtered.filter(t => t.status === 'Win'), [filtered])
-  const losses = useMemo(() => filtered.filter(t => t.status === 'Loss'), [filtered])
-
-  const totalTrades = filtered.length
-  const totalPnl = useMemo(() => filtered.reduce((s, t) => s + asNum(t.net_pnl), 0), [filtered])
-  const grossWin = useMemo(() => wins.reduce((s, t) => s + asNum(t.net_pnl), 0), [wins])
-  const grossLoss = useMemo(() => Math.abs(losses.reduce((s, t) => s + asNum(t.net_pnl), 0)), [losses])
-
-  const pf = useMemo(() => (grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : '∞'), [grossWin, grossLoss])
-  const wr = useMemo(() => (totalTrades ? (wins.length / totalTrades) * 100 : 0), [wins.length, totalTrades])
-  const avgRR = useMemo(() => {
-    const rrTrades = filtered.filter(t => t.actual_rr !== null && t.actual_rr !== undefined && t.actual_rr !== '')
-    if (!rrTrades.length) return '—'
-    const sum = rrTrades.reduce((s, t) => s + asNum(t.actual_rr), 0)
-    return (sum / rrTrades.length).toFixed(2)
-  }, [filtered])
-  const expectancy = useMemo(() => (totalTrades ? totalPnl / totalTrades : 0), [totalPnl, totalTrades])
-
-  const avgWin = wins.length ? grossWin / wins.length : 0
-  const avgLoss = losses.length ? grossLoss / losses.length : 0
-
-  // Equity curve points
-  const eqPoints = useMemo(() => {
-    let cum = 0
-    return filteredSorted.map((t, i) => {
-      cum += asNum(t.net_pnl)
-      return {
-        x: i,
-        y: cum,
-        pnl: asNum(t.net_pnl),
-        date: t.date?.slice(0, 10),
+  const grouped = useMemo(() => {
+    const map = {}
+    for (const t of filteredTrades) {
+      const d = new Date(`${String(t.date || '').slice(0, 10)}T00:00:00`)
+      if (Number.isNaN(d.getTime())) continue
+      let key = ''
+      let label = ''
+      if (grouping === 'day') {
+        key = String(t.date || '').slice(0, 10)
+        label = fmtDay(key)
+      } else if (grouping === 'week') {
+        const ws = weekStart(d)
+        key = ws.toISOString().slice(0, 10)
+        label = `Wk ${ws.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+      } else {
+        key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+        label = d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
       }
-    })
-  }, [filteredSorted])
+      if (!map[key]) {
+        map[key] = {
+          key,
+          label,
+          net: 0,
+          gross: 0,
+          trades: 0,
+          wins: 0,
+          losses: 0,
+          winGross: 0,
+          lossGross: 0,
+          startDate: key,
+        }
+      }
+      const net = asNum(t.net_pnl)
+      const gross = asNum(t.gross_pnl)
+      map[key].net += net
+      map[key].gross += gross
+      map[key].trades += 1
+      if (t.status === 'Win') {
+        map[key].wins += 1
+        map[key].winGross += Math.max(0, gross)
+      }
+      if (t.status === 'Loss') {
+        map[key].losses += 1
+        map[key].lossGross += Math.min(0, gross)
+      }
+    }
+    return Object.values(map).sort((a, b) => a.key.localeCompare(b.key))
+  }, [filteredTrades, grouping])
 
-  const eqW = 520
-  const eqH = 140
-  const eqPad = { left: 58, right: 8, top: 8, bottom: 24 }
-  const eqPlotW = eqW - eqPad.left - eqPad.right
-  const eqPlotH = eqH - eqPad.top - eqPad.bottom
-  const eqRange = useMemo(() => {
-    if (!eqPoints.length) return { minV: 0, maxV: 0, range: 1 }
-    const ys = eqPoints.map(p => p.y)
-    const minV = Math.min(0, ...ys)
-    const maxV = Math.max(0, ...ys)
-    const range = maxV - minV || 1
-    return { minV, maxV, range }
-  }, [eqPoints])
-
-  const toCoord = p => {
-    const x = eqPoints.length > 1 ? eqPad.left + (p.x / (eqPoints.length - 1)) * eqPlotW : eqPad.left + eqPlotW / 2
-    const y = eqPad.top + (1 - ((p.y - eqRange.minV) / eqRange.range)) * eqPlotH
-    return { x, y }
-  }
-
-  function handleSvgMouseMove(e) {
-    if (!svgRef.current || eqPoints.length < 2) return
-    const rect = svgRef.current.getBoundingClientRect()
-    const mouseX = ((e.clientX - rect.left) / rect.width) * eqW
-    const ratio = (mouseX - eqPad.left) / Math.max(eqPlotW, 1)
-    const idx = Math.round(ratio * (eqPoints.length - 1))
-    const clamped = Math.max(0, Math.min(eqPoints.length - 1, idx))
-    setHoverPoint({ ...eqPoints[clamped], ...toCoord(eqPoints[clamped]) })
-  }
-
-  // Daily PnL (Basic)
-  const dailyData = useMemo(() => {
-    const dailyMap = {}
-    filteredSorted.forEach(t => {
-      const d = t.date?.slice(0, 10)
-      if (!d) return
-      dailyMap[d] = (dailyMap[d] || 0) + asNum(t.net_pnl)
-    })
-    return Object.entries(dailyMap).sort(([a], [b]) => a.localeCompare(b))
-  }, [filteredSorted])
-
-  const barMaxAbs = Math.max(...dailyData.map(([, v]) => Math.abs(v)), 1)
-  const dW = 520
-  const dH = 92
-  const dPad = { left: 58, right: 8, top: 8, bottom: 22 }
-  const dPlotW = dW - dPad.left - dPad.right
-  const dPlotH = dH - dPad.top - dPad.bottom
-  const dMidY = dPad.top + dPlotH / 2
-  const eqTicksY = buildLinearTicks(eqRange.minV, eqRange.maxV, 5)
-  const eqTicksX = buildIndexTicks(eqPoints.length, 4)
-  const dailyTicksX = buildIndexTicks(dailyData.length, 4)
-  const barWidth = dailyData.length > 0 ? Math.min(Math.floor(dW / dailyData.length) - 3, 34) : 20
-
-  const r = 36
-  const circ = 2 * Math.PI * r
-  const winDash = (wr / 100) * circ
-
-  const s = {
-    page: {
-      minHeight: '100vh',
-      background: 'var(--page-bg)',
-      color: 'var(--text)',
-      padding: '20px 24px',
-      fontFamily: 'sans-serif',
-    },
-    card: {
-      background: 'var(--card-bg)',
-      border: '1px solid var(--border)',
-      borderRadius: '10px',
-      padding: '14px 16px',
-    },
-    panelTitle: {
-      fontSize: '11px',
-      fontFamily: 'monospace',
-      color: 'var(--text2)',
-      textTransform: 'uppercase',
-      letterSpacing: '0.06em',
-      marginBottom: '10px',
-    },
-    label: {
-      fontSize: '9px',
-      fontFamily: 'monospace',
-      color: 'var(--text3)',
-      textTransform: 'uppercase',
-      letterSpacing: '0.08em',
-      marginBottom: '5px',
-    },
-  }
-
-  // Advanced computations
-  const sessions = ['London', 'New York', 'Asian']
-  const sessionData = useMemo(() => {
-    return sessions.map(name => {
-      const st = filteredSorted.filter(t => t.session === name)
-      const winCount = st.filter(t => t.status === 'Win').length
-      const pnl = st.reduce((sum, t) => sum + asNum(t.net_pnl), 0)
-      const winRate = st.length ? (winCount / st.length) * 100 : 0
-      return { name, trades: st.length, wins: winCount, winRate, pnl }
-    })
-  }, [filteredSorted])
-
-  const dowData = useMemo(() => {
-    const dowMap = {}
-    filteredSorted.forEach(t => {
-      if (!t.date) return
-      const dow = new Date(t.date + 'T00:00:00').getDay()
-      const name = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dow]
-      if (!dowMap[name]) dowMap[name] = { pnl: 0, trades: 0 }
-      dowMap[name].pnl += asNum(t.net_pnl)
-      dowMap[name].trades += 1
-    })
-    return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map(d => ({
-      name: d,
-      pnl: dowMap[d]?.pnl || 0,
-      trades: dowMap[d]?.trades || 0,
+  const chartRows = useMemo(() => {
+    return grouped.map(row => ({
+      ...row,
+      leftValue: calcMetric(row, leftMetric),
+      rightValue: rightMetric ? calcMetric(row, rightMetric) : null,
     }))
-  }, [filteredSorted])
+  }, [grouped, leftMetric, rightMetric])
 
-  const gradeDistribution = useMemo(() => {
-    const grades = ['A', 'B', 'C', 'D', 'F']
-    const res = grades.map(g => {
-      const cnt = filteredSorted.filter(t => t.trade_grade === g).length
-      const pct = totalTrades ? (cnt / totalTrades) * 100 : 0
-      return { grade: g, count: cnt, pct }
-    })
-    return res
-  }, [filteredSorted, totalTrades])
-
-  const drawdownMetrics = useMemo(() => {
-    if (!eqPoints.length) {
-      return { maxDrawdown: 0, avgDrawdown: 0, recoveryFactor: '—', longestLosingStreak: 0 }
+  const chartRanges = useMemo(() => {
+    const leftVals = chartRows.map(r => asNum(r.leftValue))
+    const rightVals = rightMetric ? chartRows.map(r => asNum(r.rightValue)) : []
+    const lMin = Math.min(0, ...leftVals, 0)
+    const lMax = Math.max(0, ...leftVals, 1)
+    const rMin = rightMetric ? Math.min(...rightVals, 0) : 0
+    const rMax = rightMetric ? Math.max(...rightVals, 1) : 1
+    return {
+      leftMin: lMin,
+      leftMax: lMax,
+      rightMin: rMin,
+      rightMax: rMax,
+      leftRange: lMax - lMin || 1,
+      rightRange: rMax - rMin || 1,
     }
+  }, [chartRows, rightMetric])
 
-    let peak = -Infinity
-    let maxDD = 0 // magnitude
-    let sumDD = 0
-    let ddCount = 0
-
-    for (const p of eqPoints) {
-      peak = Math.max(peak, p.y)
-      const dd = peak - p.y // magnitude >= 0
-      if (dd > 0) {
-        maxDD = Math.max(maxDD, dd)
-        sumDD += dd
-        ddCount += 1
-      }
-    }
-
-    const avgDrawdown = ddCount ? sumDD / ddCount : 0
-    const recoveryFactor = maxDD > 0 ? totalPnl / maxDD : Infinity
-    const longestLosingStreak = computeWorstLosingStreak(filteredSorted)
+  const overallStats = useMemo(() => {
+    const totalTrades = filteredTrades.length
+    const totalPnl = filteredTrades.reduce((s, t) => s + asNum(t.net_pnl), 0)
+    const wins = filteredTrades.filter(t => t.status === 'Win')
+    const losses = filteredTrades.filter(t => t.status === 'Loss')
+    const grossWin = wins.reduce((s, t) => s + Math.max(0, asNum(t.gross_pnl)), 0)
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + Math.min(0, asNum(t.gross_pnl)), 0))
+    const winRate = totalTrades ? wins.length / totalTrades : 0
+    const expectancy = totalTrades ? totalPnl / totalTrades : 0
+    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0
 
     return {
-      maxDrawdown: maxDD,
-      avgDrawdown,
-      recoveryFactor,
-      longestLosingStreak,
+      totalPnl,
+      totalTrades,
+      averageTradePnl: expectancy,
+      expectancy,
+      profitFactor,
+      winRate,
+      insight: buildInsightOverall({ totalPnl, expectancy, profitFactor, winRate }),
     }
-  }, [eqPoints, filteredSorted, totalPnl])
+  }, [filteredTrades])
 
-  const streakMetrics = useMemo(() => {
-    return computeStreakMetrics(filteredSorted)
-  }, [filteredSorted])
+  const outcomeStats = useMemo(() => {
+    let largestProfit = 0
+    let largestLoss = 0
+    let wins = 0
+    let losses = 0
+    let breakeven = 0
+    let curWin = 0
+    let curLoss = 0
+    let maxWinStreak = 0
+    let maxLossStreak = 0
 
-  const symbolStats = useMemo(() => {
-    const map = {}
-    filteredSorted.forEach(t => {
+    for (const t of filteredTrades) {
+      const pnl = asNum(t.net_pnl)
+      if (pnl > largestProfit) largestProfit = pnl
+      if (pnl < largestLoss) largestLoss = pnl
+      if (t.status === 'Win') {
+        wins += 1
+        curWin += 1
+        curLoss = 0
+        maxWinStreak = Math.max(maxWinStreak, curWin)
+      } else if (t.status === 'Loss') {
+        losses += 1
+        curLoss += 1
+        curWin = 0
+        maxLossStreak = Math.max(maxLossStreak, curLoss)
+      } else {
+        breakeven += 1
+        curWin = 0
+        curLoss = 0
+      }
+    }
+    return {
+      wins,
+      losses,
+      breakeven,
+      largestProfit,
+      largestLoss,
+      maxWinStreak,
+      maxLossStreak,
+      insight: buildInsightOutcomes({ wins, losses, maxWinStreak, maxLossStreak, largestProfit, largestLoss }),
+    }
+  }, [filteredTrades])
+
+  const activityStats = useMemo(() => {
+    const dayMap = {}
+    const sessionMap = { London: { pnl: 0, trades: 0 }, 'New York': { pnl: 0, trades: 0 }, Asian: { pnl: 0, trades: 0 } }
+    const symbolMap = {}
+    const loggedDaysSet = new Set()
+    let totalContracts = 0
+
+    for (const t of filteredTrades) {
+      const date = String(t.date || '').slice(0, 10)
+      if (!date) continue
+      const pnl = asNum(t.net_pnl)
+      totalContracts += asNum(t.contracts)
+      loggedDaysSet.add(date)
+      dayMap[date] = (dayMap[date] || 0) + pnl
+      if (sessionMap[t.session]) {
+        sessionMap[t.session].pnl += pnl
+        sessionMap[t.session].trades += 1
+      }
       const sym = t.symbol || '—'
-      if (!map[sym]) map[sym] = { symbol: sym, trades: 0, wins: 0, pnl: 0 }
+      symbolMap[sym] = (symbolMap[sym] || 0) + pnl
+    }
+
+    const dayPnls = Object.entries(dayMap)
+    const tradingDays = dayPnls.length
+    const avgDailyVolume = tradingDays ? totalContracts / tradingDays : 0
+    const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    let bestDay = '—'
+    let bestDayPnl = -Infinity
+    for (const [date, pnl] of dayPnls) {
+      if (pnl > bestDayPnl) {
+        bestDayPnl = pnl
+        const wd = new Date(`${date}T12:00:00`).getDay()
+        bestDay = weekdays[wd] || '—'
+      }
+    }
+
+    let bestSession = '—'
+    let bestSessionPnl = -Infinity
+    for (const [name, s] of Object.entries(sessionMap)) {
+      if (s.pnl > bestSessionPnl) {
+        bestSessionPnl = s.pnl
+        bestSession = name
+      }
+    }
+
+    let bestSymbol = '—'
+    let bestSymbolPnl = -Infinity
+    for (const [sym, pnl] of Object.entries(symbolMap)) {
+      if (pnl > bestSymbolPnl) {
+        bestSymbolPnl = pnl
+        bestSymbol = sym
+      }
+    }
+
+    return {
+      avgDailyVolume,
+      tradingDays,
+      loggedDays: loggedDaysSet.size,
+      bestDay,
+      bestSession,
+      bestSymbol,
+      insight: buildInsightActivity({
+        tradingDays,
+        loggedDays: loggedDaysSet.size,
+        bestSession,
+        bestSymbol,
+      }),
+    }
+  }, [filteredTrades])
+
+  const symbolRows = useMemo(() => {
+    const map = {}
+    for (const t of filteredTrades) {
+      const sym = t.symbol || '—'
+      if (!map[sym]) {
+        map[sym] = { symbol: sym, trades: 0, wins: 0, net: 0, best: -Infinity, worst: Infinity }
+      }
+      const pnl = asNum(t.net_pnl)
       map[sym].trades += 1
       if (t.status === 'Win') map[sym].wins += 1
-      map[sym].pnl += asNum(t.net_pnl)
+      map[sym].net += pnl
+      map[sym].best = Math.max(map[sym].best, pnl)
+      map[sym].worst = Math.min(map[sym].worst, pnl)
+    }
+    return Object.values(map)
+      .map(r => ({
+        ...r,
+        winRate: r.trades ? r.wins / r.trades : 0,
+        avg: r.trades ? r.net / r.trades : 0,
+        best: Number.isFinite(r.best) ? r.best : 0,
+        worst: Number.isFinite(r.worst) ? r.worst : 0,
+      }))
+      .sort((a, b) => b.net - a.net)
+  }, [filteredTrades])
+
+  const sessionRows = useMemo(() => {
+    const rows = SESSIONS.map(name => {
+      const list = filteredTrades.filter(t => t.session === name)
+      const tradesCount = list.length
+      const wins = list.filter(t => t.status === 'Win').length
+      const net = list.reduce((s, t) => s + asNum(t.net_pnl), 0)
+      return {
+        name,
+        trades: tradesCount,
+        winRate: tradesCount ? wins / tradesCount : 0,
+        net,
+      }
     })
-    const rows = Object.values(map).map(r => ({
-      ...r,
-      winRate: r.trades ? (r.wins / r.trades) * 100 : 0,
-    }))
-    rows.sort((a, b) => b.pnl - a.pnl)
-    return rows
-  }, [filteredSorted])
+    const maxAbs = Math.max(...rows.map(r => Math.abs(r.net)), 1)
+    return rows.map(r => ({ ...r, pct: (Math.abs(r.net) / maxAbs) * 100 }))
+  }, [filteredTrades])
 
-  function computeWorstLosingStreak(list) {
-    let lossStreak = 0
-    let worst = 0
-    for (const t of list) {
-      if (t.status === 'Loss') {
-        lossStreak += 1
-        worst = Math.max(worst, lossStreak)
-      } else {
-        lossStreak = 0
-      }
-    }
-    return worst
+  function exportCsv() {
+    const rows = filteredTrades
+    const headers = [
+      'id',
+      'account_id',
+      'date',
+      'symbol',
+      'session',
+      'direction',
+      'contracts',
+      'gross_pnl',
+      'fees',
+      'net_pnl',
+      'entry_price',
+      'exit_price',
+      'entry_time',
+      'exit_time',
+      'status',
+      'actual_rr',
+      'trade_grade',
+      'created_at',
+    ]
+    const csv = [
+      headers.join(','),
+      ...rows.map(r =>
+        headers
+          .map(h => {
+            const v = r[h] ?? ''
+            const s = String(v).replaceAll('"', '""')
+            return `"${s}"`
+          })
+          .join(',')
+      ),
+    ].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `pulsed-reports-${selectedRange}-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
-  function computeStreakMetrics(list) {
-    let winStreak = 0
-    let lossStreak = 0
-    let bestWin = 0
-    let worstLoss = 0
+  const dateRangeLabel = DATE_RANGES.find(r => r.id === selectedRange)?.label || 'Last 30 days'
+  const leftColor = accent
+  const rightColor = PROFIT_COLOR
 
-    for (const t of list) {
-      if (t.status === 'Win') {
-        winStreak += 1
-        bestWin = Math.max(bestWin, winStreak)
-        lossStreak = 0
-      } else if (t.status === 'Loss') {
-        lossStreak += 1
-        worstLoss = Math.max(worstLoss, lossStreak)
-        winStreak = 0
-      } else {
-        winStreak = 0
-        lossStreak = 0
-      }
-    }
+  const chartW = 1000
+  const chartH = 360
+  const pad = { top: 24, left: 70, right: 72, bottom: 48 }
+  const plotW = chartW - pad.left - pad.right
+  const plotH = chartH - pad.top - pad.bottom
 
-    // Current streak at the end of the dataset
-    let currentType = 'None'
-    let currentCount = 0
-    const last = list[list.length - 1]
-    if (last?.status === 'Win') currentType = 'Win'
-    if (last?.status === 'Loss') currentType = 'Loss'
-
-    if (currentType !== 'None') {
-      for (let i = list.length - 1; i >= 0; i -= 1) {
-        if (list[i].status === currentType) currentCount += 1
-        else break
-      }
-    }
-
-    return { currentType, currentCount, bestWin, worstLoss }
+  function xAt(i, total) {
+    if (total <= 1) return pad.left + plotW / 2
+    return pad.left + (i / (total - 1)) * plotW
   }
-
-  const tierToggle = (
-    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px' }}>
-      <button
-        type="button"
-        onClick={() => setTier('basic')}
-        style={{
-          borderRadius: '10px',
-          border: tier === 'basic' ? `1px solid ${accent}` : '1px solid var(--border)',
-          background: tier === 'basic' ? 'rgba(124,58,237,0.12)' : 'var(--bg3)',
-          color: 'var(--text)',
-          padding: '10px 16px',
-          fontSize: '13px',
-          fontFamily: 'monospace',
-          cursor: 'pointer',
-          minWidth: '140px',
-        }}
-      >
-        Basic
-      </button>
-      <button
-        type="button"
-        onClick={() => setTier('advanced')}
-        style={{
-          borderRadius: '10px',
-          border: tier === 'advanced' ? `1px solid ${accent}` : '1px solid var(--border)',
-          background: tier === 'advanced' ? 'rgba(124,58,237,0.12)' : 'var(--bg3)',
-          color: 'var(--text)',
-          padding: '10px 16px',
-          fontSize: '13px',
-          fontFamily: 'monospace',
-          cursor: 'pointer',
-          minWidth: '160px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '10px',
-        }}
-      >
-        <span>Advanced</span>
-        <span
-          style={{
-            fontSize: '10px',
-            fontFamily: 'monospace',
-            borderRadius: '999px',
-            padding: '3px 10px',
-            border: '1px solid rgba(245,158,11,0.55)',
-            background: 'rgba(245,158,11,0.15)',
-            color: '#F59E0B',
-          }}
-        >
-          PRO
-        </span>
-      </button>
-    </div>
-  )
-
-  const basicKpis = (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: '8px', marginBottom: '16px' }}>
-      {[
-        { label: 'Net P&L', value: fmtPnl(totalPnl), color: pnlColor(totalPnl), primary: true },
-        { label: 'Profit Factor', value: pf, color: 'var(--text)' },
-        { label: 'Win Rate', value: fmtPct(wr), color: accent },
-        { label: 'Avg RR', value: avgRR === '—' ? avgRR : `${avgRR}R`, color: 'var(--text)' },
-        { label: 'Expectancy', value: fmtPnl(expectancy), color: pnlColor(expectancy), primary: true },
-        { label: 'Total Trades', value: totalTrades, color: 'var(--text)' },
-      ].map((k, i) => (
-        <div
-          key={i}
-          style={{
-            ...s.card,
-            position: 'relative',
-            overflow: 'hidden',
-            borderColor: k.primary ? 'rgba(124,58,237,0.45)' : 'var(--border)',
-          }}
-        >
-          {k.primary && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: accent }} />}
-          <div style={s.label}>{k.label}</div>
-          <div style={{ fontSize: '17px', fontFamily: 'monospace', fontWeight: 500, color: k.color }}>{k.value}</div>
-        </div>
-      ))}
-    </div>
-  )
-
-  const equityCard = (
-    <div style={s.card}>
-      <div style={s.panelTitle}>Equity Curve — hover to inspect</div>
-      {eqPoints.length > 1 ? (
-        <div style={{ position: 'relative' }}>
-          <svg
-            ref={svgRef}
-            width="100%"
-            viewBox={`0 0 ${eqW} ${eqH}`}
-            preserveAspectRatio="none"
-            style={{ display: 'block', cursor: 'crosshair' }}
-            onMouseMove={handleSvgMouseMove}
-            onMouseLeave={() => setHoverPoint(null)}
-          >
-            <line x1={eqPad.left} y1={eqPad.top + eqPlotH} x2={eqPad.left + eqPlotW} y2={eqPad.top + eqPlotH} stroke="var(--border-md)" strokeWidth="0.8" />
-            <line x1={eqPad.left} y1={eqPad.top} x2={eqPad.left} y2={eqPad.top + eqPlotH} stroke="var(--border-md)" strokeWidth="0.8" />
-            {eqTicksY.map((t, i) => {
-              const y = eqPad.top + (1 - ((t - eqRange.minV) / (eqRange.maxV - eqRange.minV || 1))) * eqPlotH
-              return (
-                <g key={`eq-grid-${i}`}>
-                  <line x1={eqPad.left} y1={y} x2={eqPad.left + eqPlotW} y2={y} stroke="var(--border)" strokeWidth="0.5" />
-                  <text x={eqPad.left - 7} y={y + 3} textAnchor="end" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">{fmtAxisCurrency(t)}</text>
-                </g>
-              )
-            })}
-            {eqPoints.slice(1).map((pt, i) => {
-              const prev = eqPoints[i]
-              const c1 = toCoord(prev)
-              const c2 = toCoord(pt)
-              const isUp = pt.y >= prev.y
-              return (
-                <line
-                  key={i}
-                  x1={c1.x}
-                  y1={c1.y}
-                  x2={c2.x}
-                  y2={c2.y}
-                  stroke={isUp ? GREEN : RED}
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                />
-              )
-            })}
-            {hoverPoint && (
-              <>
-                <line x1={hoverPoint.x} y1={eqPad.top} x2={hoverPoint.x} y2={eqPad.top + eqPlotH} stroke="var(--text3)" strokeWidth="0.8" strokeDasharray="3 3" />
-                <circle cx={hoverPoint.x} cy={hoverPoint.y} r="5" fill={hoverPoint.pnl >= 0 ? GREEN : RED} stroke="var(--card-bg)" strokeWidth="2" />
-              </>
-            )}
-            {eqTicksX.map((idx) => {
-              const x = eqPad.left + (eqPoints.length > 1 ? (idx / (eqPoints.length - 1)) * eqPlotW : 0)
-              return (
-                <text key={`eq-date-${idx}`} x={x} y={eqPad.top + eqPlotH + 13} textAnchor="middle" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">
-                  {formatDateTick(eqPoints[idx]?.date)}
-                </text>
-              )
-            })}
-          </svg>
-
-          {hoverPoint && (
-            <div
-              style={{
-                position: 'absolute',
-                top: '8px',
-                right: '8px',
-                background: 'var(--bg3)',
-                border: '1px solid var(--border-md)',
-                borderRadius: '8px',
-                padding: '8px 12px',
-                pointerEvents: 'none',
-                minWidth: '140px',
-              }}
-            >
-              <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginBottom: '4px' }}>{hoverPoint.date}</div>
-              <div style={{ fontSize: '13px', fontFamily: 'monospace', fontWeight: 500, color: pnlColor(hoverPoint.pnl), marginBottom: '2px' }}>
-                {fmtPnl(hoverPoint.pnl)} this trade
-              </div>
-              <div style={{ fontSize: '12px', fontFamily: 'monospace', color: pnlColor(hoverPoint.y) }}>Cumulative: {fmtPnl(hoverPoint.y)}</div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text3)', fontSize: '12px', fontFamily: 'monospace' }}>
-          Log more trades to see your equity curve
-        </div>
-      )}
-    </div>
-  )
-
-  const winLossCard = (
-    <div style={s.card}>
-      <div style={s.panelTitle}>Win / Loss Split</div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '10px 0' }}>
-        <svg width="88" height="88" viewBox="0 0 88 88">
-          <circle cx="44" cy="44" r={r} fill="none" stroke="rgba(239,68,68,0.25)" strokeWidth="8" />
-          <circle
-            cx="44"
-            cy="44"
-            r={r}
-            fill="none"
-            stroke={GREEN}
-            strokeWidth="8"
-            strokeDasharray={`${winDash} ${circ - winDash}`}
-            strokeLinecap="round"
-            transform="rotate(-90 44 44)"
-          />
-          <text x="44" y="48" textAnchor="middle" fontFamily="monospace" fontSize="13" fontWeight="500" fill="var(--text)">
-            {wr.toFixed(1)}%
-          </text>
-        </svg>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div>
-            <div style={{ fontSize: '16px', fontFamily: 'monospace', fontWeight: 500, color: GREEN }}>{wins.length} Wins</div>
-            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>avg {avgWin >= 0 ? '+' : '-'}${Math.abs(avgWin).toFixed(2)}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: '16px', fontFamily: 'monospace', fontWeight: 500, color: RED }}>{losses.length} Losses</div>
-            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)' }}>avg -${avgLoss.toFixed(2)}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-
-  const dailyCard = (
-    <div style={s.card}>
-      <div style={s.panelTitle}>Daily P&L</div>
-      {dailyData.length > 0 ? (
-        <div style={{ position: 'relative' }}>
-          {hoverDailyIndex !== null && dailyData[hoverDailyIndex] && (
-            <div
-              style={{
-                position: 'absolute',
-                top: '8px',
-                right: '8px',
-                background: 'var(--bg3)',
-                border: '1px solid var(--border-md)',
-                borderRadius: '8px',
-                padding: '8px 12px',
-                pointerEvents: 'none',
-                minWidth: '130px',
-              }}
-            >
-              <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginBottom: '4px' }}>{dailyData[hoverDailyIndex][0]}</div>
-              <div style={{ fontSize: '12px', fontFamily: 'monospace', color: pnlColor(dailyData[hoverDailyIndex][1]), marginBottom: '2px' }}>
-                Day: {fmtPnl(dailyData[hoverDailyIndex][1])}
-              </div>
-            </div>
-          )}
-
-          <svg
-            width="100%"
-            viewBox={`0 0 ${dW} ${dH}`}
-            preserveAspectRatio="none"
-            style={{ cursor: 'crosshair' }}
-            onMouseMove={e => {
-              const rect = e.currentTarget.getBoundingClientRect()
-              const rawX = ((e.clientX - rect.left) / rect.width) * dW
-              const ratio = (rawX - dPad.left) / Math.max(dPlotW, 1)
-              const idx = Math.max(0, Math.min(dailyData.length - 1, Math.floor(ratio * dailyData.length)))
-              setHoverDailyIndex(idx)
-            }}
-            onMouseLeave={() => setHoverDailyIndex(null)}
-          >
-            <line x1={dPad.left} y1={dPad.top + dPlotH} x2={dPad.left + dPlotW} y2={dPad.top + dPlotH} stroke="var(--border-md)" strokeWidth="0.8" />
-            <line x1={dPad.left} y1={dPad.top} x2={dPad.left} y2={dPad.top + dPlotH} stroke="var(--border-md)" strokeWidth="0.8" />
-            <line x1={dPad.left} y1={dMidY} x2={dPad.left + dPlotW} y2={dMidY} stroke="var(--border)" strokeWidth="0.8" />
-            <text x={dPad.left - 7} y={dPad.top + 3} textAnchor="end" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">{fmtAxisCurrency(barMaxAbs)}</text>
-            <text x={dPad.left - 7} y={dMidY + 3} textAnchor="end" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">$0</text>
-            <text x={dPad.left - 7} y={dPad.top + dPlotH + 3} textAnchor="end" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">{fmtAxisCurrency(-barMaxAbs)}</text>
-            {dailyData.map(([, val], i) => {
-              const slotW = dPlotW / Math.max(dailyData.length, 1)
-              const x = dPad.left + i * slotW + (slotW - barWidth) / 2
-              const bh = Math.max((Math.abs(val) / barMaxAbs) * (dPlotH / 2 - 4), 2)
-              const isPos = val >= 0
-              return (
-                <rect
-                  key={i}
-                  x={x}
-                  y={isPos ? dMidY - bh : dMidY}
-                  width={barWidth}
-                  height={bh}
-                  rx="2"
-                  fill={isPos ? GREEN : RED}
-                  opacity={hoverDailyIndex === null || hoverDailyIndex === i ? 0.9 : 0.4}
-                />
-              )
-            })}
-            {dailyTicksX.map((idx) => {
-              const x = dPad.left + (dailyData.length > 1 ? (idx / (dailyData.length - 1)) * dPlotW : 0)
-              return (
-                <text key={`daily-date-${idx}`} x={x} y={dPad.top + dPlotH + 13} textAnchor="middle" fontSize="8.5" fill="var(--text3)" fontFamily="monospace">
-                  {formatDateTick(dailyData[idx]?.[0])}
-                </text>
-              )
-            })}
-          </svg>
-        </div>
-      ) : (
-        <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text3)', fontSize: '12px', fontFamily: 'monospace' }}>
-          No data yet
-        </div>
-      )}
-    </div>
-  )
-
-  const advancedPanels = (
-    <>
-      {/* Session + Day of week */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px', marginBottom: '12px' }}>
-        <div style={s.card}>
-          <div style={s.panelTitle}>Performance by Session</div>
-          {sessionData.some(x => x.trades > 0) ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {sessionData.map(row => {
-                const maxAbs = Math.max(...sessionData.map(s => Math.abs(s.pnl)), 1)
-                const pct = (Math.abs(row.pnl) / maxAbs) * 100
-                const barColor = row.pnl >= 0 ? GREEN : RED
-                return (
-                  <div key={row.name} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                      <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text2)' }}>{row.name}</span>
-                      <span style={{ fontSize: '11px', fontFamily: 'monospace', color: pnlColor(row.pnl) }}>
-                        {row.trades ? `${row.trades} trades · ${row.winRate.toFixed(0)}% WR · ${fmtPnl(row.pnl)}` : '—'}
-                      </span>
-                    </div>
-                    <div style={{ height: '14px', background: 'var(--bg3)', borderRadius: '4px', overflow: 'hidden' }}>
-                      <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: '4px', opacity: 0.85 }} />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '22px', color: 'var(--text3)', fontFamily: 'monospace', fontSize: '12px' }}>
-              No session data yet
-            </div>
-          )}
-        </div>
-
-        <div style={s.card}>
-          <div style={s.panelTitle}>Performance by Day of Week</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {dowData.map(row => {
-              const maxAbs = Math.max(...dowData.map(x => Math.abs(x.pnl)), 1)
-              const pct = (Math.abs(row.pnl) / maxAbs) * 100
-              const barColor = row.pnl >= 0 ? GREEN : RED
-              return (
-                <div key={row.name} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                    <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text2)' }}>{row.name}</span>
-                    <span style={{ fontSize: '11px', fontFamily: 'monospace', color: pnlColor(row.pnl) }}>
-                      {row.trades ? `${row.trades} trades · ${fmtPnl(row.pnl)}` : '—'}
-                    </span>
-                  </div>
-                  <div style={{ height: '14px', background: 'var(--bg3)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: '4px', opacity: 0.85 }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Trade grade + Drawdown */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-        <div style={s.card}>
-          <div style={s.panelTitle}>Trade Grade Distribution</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {gradeDistribution.map(g => {
-              const colors = { A: GREEN, B: '#4ADE80', C: '#EAB308', D: '#F97316', F: RED }
-              return (
-                <div key={g.grade} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                    <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text2)' }}>{g.grade}</span>
-                    <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)' }}>
-                      {g.count ? `${Math.round(g.pct)}% · ${g.count} trades` : '—'}
-                    </span>
-                  </div>
-                  <div style={{ height: '14px', background: 'var(--bg3)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ width: `${g.pct}%`, height: '100%', background: colors[g.grade], borderRadius: '4px', opacity: 0.9 }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          {filteredSorted.filter(t => t.trade_grade).length === 0 && (
-            <div style={{ textAlign: 'center', padding: '18px', color: 'var(--text3)', fontFamily: 'monospace', fontSize: '12px' }}>
-              Grade your trades to see distribution
-            </div>
-          )}
-        </div>
-
-        <div style={s.card}>
-          <div style={s.panelTitle}>Drawdown Analysis</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <Stat
-              title="Max drawdown"
-              value={drawdownMetrics.maxDrawdown ? fmtPnl(-drawdownMetrics.maxDrawdown) : '—'}
-              valueColor={drawdownMetrics.maxDrawdown ? RED : 'var(--text3)'}
-            />
-            <Stat
-              title="Longest losing streak"
-              value={drawdownMetrics.longestLosingStreak || 0}
-              valueColor={drawdownMetrics.longestLosingStreak ? RED : 'var(--text3)'}
-            />
-            <Stat
-              title="Average drawdown"
-              value={drawdownMetrics.avgDrawdown ? fmtPnl(-drawdownMetrics.avgDrawdown) : '—'}
-              valueColor={drawdownMetrics.avgDrawdown ? RED : 'var(--text3)'}
-            />
-            <Stat
-              title="Recovery factor"
-              value={Number.isFinite(drawdownMetrics.recoveryFactor) ? drawdownMetrics.recoveryFactor.toFixed(2) : '∞'}
-              valueColor={'var(--text)'}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Streak tracker */}
-      <div style={{ marginBottom: '12px' }}>
-        <div style={s.card}>
-          <div style={s.panelTitle}>Streak Tracker</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div
-              style={{
-                border: '1px solid var(--border)',
-                borderRadius: '10px',
-                background: 'var(--bg3)',
-                padding: '12px 14px',
-              }}
-            >
-              <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                Current streak
-              </div>
-              <div
-                style={{
-                  fontSize: '18px',
-                  fontFamily: 'monospace',
-                  fontWeight: 700,
-                  color: streakMetrics.currentType === 'Win' ? GREEN : streakMetrics.currentType === 'Loss' ? RED : 'var(--text3)',
-                  marginTop: '6px',
-                }}
-              >
-                {streakMetrics.currentType === 'None' ? 'No streak' : `${streakMetrics.currentCount} ${streakMetrics.currentType} Streak`}
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              <Stat title="Best winning streak" value={streakMetrics.bestWin} valueColor={GREEN} />
-              <Stat title="Worst losing streak" value={streakMetrics.worstLoss} valueColor={RED} />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Symbols */}
-      <div style={{ ...s.card, marginBottom: '12px' }}>
-        <div style={s.panelTitle}>Best & Worst Symbols</div>
-        {symbolStats.length ? (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <th style={{ textAlign: 'left', fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', padding: '10px 6px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Symbol
-                  </th>
-                  <th style={{ textAlign: 'right', fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', padding: '10px 6px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Trades
-                  </th>
-                  <th style={{ textAlign: 'right', fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', padding: '10px 6px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Win rate
-                  </th>
-                  <th style={{ textAlign: 'right', fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', padding: '10px 6px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Net P&L
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {symbolStats.map(row => (
-                  <tr key={row.symbol} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
-                    <td style={{ padding: '10px 6px', fontFamily: 'monospace', color: 'var(--text)' }}>{row.symbol}</td>
-                    <td style={{ padding: '10px 6px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text2)' }}>{row.trades}</td>
-                    <td style={{ padding: '10px 6px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text2)' }}>{row.winRate.toFixed(1)}%</td>
-                    <td style={{ padding: '10px 6px', textAlign: 'right', fontFamily: 'monospace', color: pnlColor(row.pnl) }}>
-                      {fmtPnl(row.pnl)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '22px', color: 'var(--text3)', fontFamily: 'monospace', fontSize: '12px' }}>No symbol data yet</div>
-        )}
-      </div>
-    </>
-  )
-
-  // Helper component inside file
-  function Stat({ title, value, valueColor }) {
-    return (
-      <div style={{ border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg3)', padding: '12px 14px' }}>
-        <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-          {title}
-        </div>
-        <div style={{ marginTop: '6px', fontSize: '18px', fontFamily: 'monospace', fontWeight: 800, color: valueColor }}>{value}</div>
-      </div>
-    )
+  function yLeft(v) {
+    return pad.top + (1 - (asNum(v) - chartRanges.leftMin) / chartRanges.leftRange) * plotH
+  }
+  function yRight(v) {
+    return pad.top + (1 - (asNum(v) - chartRanges.rightMin) / chartRanges.rightRange) * plotH
   }
 
   return (
-    <div style={s.page}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-        <div>
-          <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '4px' }}>
-            Analytics
-          </div>
-          <h1 style={{ fontSize: '24px', fontWeight: 600, margin: 0 }}>Performance Overview</h1>
+    <div
+      style={{
+        minHeight: '100vh',
+        background: 'var(--page-bg)',
+        color: 'var(--text)',
+        padding: '22px 24px 28px',
+        fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '18px' }}>
+        <h1 style={{ margin: 0, fontSize: '30px', fontWeight: 650, letterSpacing: '-0.02em', flex: '1 1 auto' }}>Reports</h1>
+
+        <div style={{ flex: '0 1 320px', position: 'relative' }}>
+          <span style={{ position: 'absolute', left: '12px', top: '9px', color: 'var(--text3)', fontSize: '14px' }}>📅</span>
+          <select
+            value={selectedRange}
+            onChange={e => setSelectedRange(e.target.value)}
+            style={{
+              width: '100%',
+              appearance: 'none',
+              borderRadius: '10px',
+              border: '1px solid var(--border)',
+              background: 'var(--card-bg)',
+              color: 'var(--text)',
+              fontSize: '13px',
+              padding: '9px 34px 9px 34px',
+              outline: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            {DATE_RANGES.map(r => (
+              <option key={r.id} value={r.id}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          <span style={{ position: 'absolute', right: '10px', top: '8px', color: 'var(--text3)' }}>▾</span>
         </div>
 
         <select
           value={selectedAccount}
           onChange={e => setSelectedAccount(e.target.value)}
           style={{
-            background: 'var(--bg3)',
-            border: '1px solid var(--border-md)',
-            borderRadius: '7px',
+            borderRadius: '10px',
+            border: '1px solid var(--border)',
+            background: 'var(--card-bg)',
             color: 'var(--text)',
-            fontFamily: 'monospace',
-            fontSize: '12px',
-            padding: '6px 12px',
+            fontSize: '13px',
+            padding: '9px 12px',
             outline: 'none',
             cursor: 'pointer',
+            minWidth: '170px',
           }}
         >
           <option value="all">All Accounts</option>
@@ -899,26 +562,446 @@ export default function AnalyticsPage() {
             </option>
           ))}
         </select>
+
+        <button
+          type="button"
+          onClick={exportCsv}
+          style={{
+            borderRadius: '10px',
+            border: '1px solid var(--border)',
+            background: 'var(--card-bg)',
+            color: 'var(--text)',
+            fontSize: '13px',
+            fontWeight: 600,
+            padding: '9px 14px',
+            cursor: 'pointer',
+          }}
+        >
+          Export CSV
+        </button>
       </div>
 
-      {tierToggle}
-
-      {basicKpis}
-
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px', marginBottom: '12px' }}>
-        {equityCard}
-        {winLossCard}
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px', marginBottom: '12px' }}>{dailyCard}</div>
-
-      {tier === 'advanced' ? advancedPanels : null}
-
-      {loading && (
-        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text3)', fontFamily: 'monospace', fontSize: '12px' }}>
-          Loading...
+      <div
+        style={{
+          border: '1px solid var(--border)',
+          background: 'var(--card-bg)',
+          borderRadius: '12px',
+          padding: '10px 14px',
+          marginBottom: '14px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text2)', fontSize: '13px' }}>
+          <strong style={{ color: 'var(--text)' }}>Summary</strong>
+          <span>▾</span>
+          <span>
+            report for <strong style={{ color: 'var(--text)' }}>{dateRangeLabel}</strong>
+          </span>
         </div>
-      )}
+        <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
+          {GROUPING_OPTIONS.map(g => (
+            <button
+              key={g}
+              type="button"
+              onClick={() => setGrouping(g)}
+              style={{
+                border: 'none',
+                borderRight: g !== 'month' ? '1px solid var(--border)' : 'none',
+                background: grouping === g ? 'rgba(124,58,237,0.12)' : 'var(--card-bg)',
+                color: grouping === g ? accent : 'var(--text2)',
+                fontSize: '12px',
+                fontWeight: 600,
+                padding: '7px 14px',
+                cursor: 'pointer',
+                textTransform: 'capitalize',
+              }}
+            >
+              {g}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div
+        style={{
+          border: '1px solid var(--border)',
+          background: 'var(--card-bg)',
+          borderRadius: '14px',
+          padding: '14px',
+          marginBottom: '16px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '10px' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <select value={leftMetric} onChange={e => setLeftMetric(e.target.value)} style={metricSelectStyle}>
+              {METRICS.map(m => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            {rightMetric ? (
+              <select value={rightMetric} onChange={e => setRightMetric(e.target.value)} style={metricSelectStyle}>
+                {METRICS.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <button type="button" onClick={() => setRightMetric('win_rate')} style={metricButtonStyle}>
+                Add Metric
+              </button>
+            )}
+            {rightMetric ? (
+              <button type="button" onClick={() => setRightMetric(null)} style={metricButtonStyle}>
+                Clear
+              </button>
+            ) : null}
+          </div>
+
+          <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
+            <button
+              type="button"
+              onClick={() => setChartType('line')}
+              style={{
+                ...iconToggleStyle,
+                background: chartType === 'line' ? 'rgba(124,58,237,0.12)' : 'var(--card-bg)',
+                color: chartType === 'line' ? accent : 'var(--text2)',
+              }}
+              title="Line chart"
+            >
+              ╱╲
+            </button>
+            <button
+              type="button"
+              onClick={() => setChartType('bar')}
+              style={{
+                ...iconToggleStyle,
+                borderLeft: '1px solid var(--border)',
+                background: chartType === 'bar' ? 'rgba(124,58,237,0.12)' : 'var(--card-bg)',
+                color: chartType === 'bar' ? accent : 'var(--text2)',
+              }}
+              title="Bar chart"
+            >
+              ▮▮
+            </button>
+          </div>
+        </div>
+
+        <svg width="100%" viewBox={`0 0 ${chartW} ${chartH}`} preserveAspectRatio="none" style={{ display: 'block' }}>
+          {yTicks(chartRanges.leftMin, chartRanges.leftMax, 5).map((tick, i) => {
+            const y = yLeft(tick)
+            return (
+              <g key={`l-${i}`}>
+                <line x1={pad.left} y1={y} x2={pad.left + plotW} y2={y} stroke="var(--border)" strokeWidth="1" />
+                <text x={pad.left - 8} y={y + 4} textAnchor="end" fontSize="10" fill="var(--text3)">
+                  {formatAxisValue(tick, leftMetric)}
+                </text>
+              </g>
+            )
+          })}
+
+          {rightMetric
+            ? yTicks(chartRanges.rightMin, chartRanges.rightMax, 5).map((tick, i) => {
+                const y = yRight(tick)
+                return (
+                  <text key={`r-${i}`} x={pad.left + plotW + 8} y={y + 4} textAnchor="start" fontSize="10" fill="var(--text3)">
+                    {formatAxisValue(tick, rightMetric)}
+                  </text>
+                )
+              })
+            : null}
+
+          {leftMetric === 'net_pnl' ? (
+            <line
+              x1={pad.left}
+              x2={pad.left + plotW}
+              y1={yLeft(0)}
+              y2={yLeft(0)}
+              stroke="var(--text3)"
+              strokeWidth="1"
+              strokeDasharray="5 5"
+            />
+          ) : null}
+
+          {chartRows.length > 0
+            ? chartRows.map((row, i) => {
+                const x = xAt(i, chartRows.length)
+                if (chartType === 'bar') {
+                  const base = yLeft(0)
+                  const y = yLeft(row.leftValue)
+                  const barW = Math.max(10, Math.min(28, plotW / Math.max(1, chartRows.length * 1.8)))
+                  return (
+                    <rect
+                      key={`bar-l-${row.key}`}
+                      x={x - barW / 2}
+                      y={Math.min(y, base)}
+                      width={barW}
+                      height={Math.max(1, Math.abs(base - y))}
+                      fill={leftColor}
+                      opacity="0.78"
+                      rx="4"
+                    />
+                  )
+                }
+                if (i === 0) return null
+                const prev = chartRows[i - 1]
+                return (
+                  <line
+                    key={`line-l-${row.key}`}
+                    x1={xAt(i - 1, chartRows.length)}
+                    y1={yLeft(prev.leftValue)}
+                    x2={x}
+                    y2={yLeft(row.leftValue)}
+                    stroke={leftColor}
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                  />
+                )
+              })
+            : null}
+
+          {rightMetric
+            ? chartRows.map((row, i) => {
+                const x = xAt(i, chartRows.length)
+                if (chartType === 'bar') {
+                  const base = yRight(0)
+                  const y = yRight(row.rightValue)
+                  const barW = Math.max(8, Math.min(20, plotW / Math.max(1, chartRows.length * 2.4)))
+                  return (
+                    <rect
+                      key={`bar-r-${row.key}`}
+                      x={x + 6}
+                      y={Math.min(y, base)}
+                      width={barW}
+                      height={Math.max(1, Math.abs(base - y))}
+                      fill={rightColor}
+                      opacity="0.7"
+                      rx="3"
+                    />
+                  )
+                }
+                if (i === 0) return null
+                const prev = chartRows[i - 1]
+                return (
+                  <line
+                    key={`line-r-${row.key}`}
+                    x1={xAt(i - 1, chartRows.length)}
+                    y1={yRight(prev.rightValue)}
+                    x2={x}
+                    y2={yRight(row.rightValue)}
+                    stroke={rightColor}
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                  />
+                )
+              })
+            : null}
+
+          {chartRows.map((row, i) => {
+            const x = xAt(i, chartRows.length)
+            return (
+              <text key={`x-${row.key}`} x={x} y={chartH - 16} textAnchor="middle" fontSize="10" fill="var(--text3)">
+                {row.label}
+              </text>
+            )
+          })}
+        </svg>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
+        <SummaryCard
+          title="Overall Performance"
+          borderColor={accent}
+          items={[
+            ['Total P&L', fmtCurrency(overallStats.totalPnl)],
+            ['Total Number of Trades', overallStats.totalTrades],
+            ['Average Trade P&L', fmtCurrency(overallStats.averageTradePnl)],
+            ['Trade Expectancy', fmtCurrency(overallStats.expectancy)],
+            ['Profit Factor', Number.isFinite(overallStats.profitFactor) ? overallStats.profitFactor.toFixed(2) : '∞'],
+          ]}
+          insight={overallStats.insight}
+        />
+        <SummaryCard
+          title="Trade Outcomes"
+          borderColor={PROFIT_COLOR}
+          items={[
+            ['Winning Trades', outcomeStats.wins],
+            ['Losing Trades', outcomeStats.losses],
+            ['Break Even Trades', outcomeStats.breakeven],
+            ['Largest Profit', <span style={{ color: PROFIT_COLOR }}>{fmtCurrency(outcomeStats.largestProfit)}</span>],
+            ['Largest Loss', <span style={{ color: LOSS_COLOR }}>{fmtCurrency(outcomeStats.largestLoss)}</span>],
+            ['Max Consecutive Wins', outcomeStats.maxWinStreak],
+            ['Max Consecutive Losses', outcomeStats.maxLossStreak],
+          ]}
+          insight={outcomeStats.insight}
+        />
+        <SummaryCard
+          title="Trading Activity"
+          borderColor={'#3B82F6'}
+          items={[
+            ['Average Daily Volume', `${activityStats.avgDailyVolume.toFixed(1)} contracts`],
+            ['Total Trading Days', activityStats.tradingDays],
+            ['Logged Days', activityStats.loggedDays],
+            ['Best Trading Day', activityStats.bestDay],
+            ['Best Session', activityStats.bestSession],
+            ['Best Symbol', activityStats.bestSymbol],
+          ]}
+          insight={activityStats.insight}
+        />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '12px' }}>
+        <div style={panelStyle}>
+          <div style={panelTitleStyle}>Performance by Symbol</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  {['Symbol', 'Trades', 'Win%', 'Net P&L', 'Avg P&L', 'Best Trade', 'Worst Trade'].map(h => (
+                    <th key={h} style={thStyle}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {symbolRows.map(row => (
+                  <tr key={row.symbol} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={tdStyle}>{row.symbol}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{row.trades}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtPercent(row.winRate)}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', color: row.net >= 0 ? PROFIT_COLOR : LOSS_COLOR }}>{fmtCurrency(row.net)}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtCurrency(row.avg)}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', color: PROFIT_COLOR }}>{fmtCurrency(row.best)}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', color: LOSS_COLOR }}>{fmtCurrency(row.worst)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {symbolRows.length === 0 ? <div style={{ color: 'var(--text3)', padding: '14px 2px' }}>No symbol performance data yet.</div> : null}
+          </div>
+        </div>
+
+        <div style={panelStyle}>
+          <div style={panelTitleStyle}>Performance by Session</div>
+          <div style={{ display: 'grid', gap: '12px' }}>
+            {sessionRows.map(row => (
+              <div key={row.name}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
+                  <strong>{row.name}</strong>
+                  <span style={{ color: 'var(--text2)' }}>
+                    {row.trades} trades · {fmtPercent(row.winRate)} · <span style={{ color: row.net >= 0 ? PROFIT_COLOR : LOSS_COLOR }}>{fmtCurrency(row.net)}</span>
+                  </span>
+                </div>
+                <div style={{ height: '12px', borderRadius: '99px', background: 'var(--page-bg)', border: '1px solid var(--border)', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${row.pct}%`,
+                      height: '100%',
+                      background: row.net >= 0 ? PROFIT_COLOR : LOSS_COLOR,
+                      opacity: 0.85,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ color: 'var(--text3)', fontSize: '12px', marginTop: '14px' }}>
+        {loading ? 'Loading report data...' : `Showing ${filteredTrades.length} trades · Updated ${fmtDayLong(new Date().toISOString())}`}
+      </div>
     </div>
   )
+}
+
+function SummaryCard({ title, items, insight, borderColor }) {
+  return (
+    <section
+      style={{
+        background: 'var(--card-bg)',
+        border: '1px solid var(--border)',
+        borderLeft: `4px solid ${borderColor}`,
+        borderRadius: '12px',
+        padding: '14px',
+        minHeight: '235px',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      <h3 style={{ margin: '0 0 10px', fontSize: '16px', fontWeight: 650 }}>{title}</h3>
+      <div style={{ display: 'grid', gap: '6px', marginBottom: '10px' }}>
+        {items.map(([label, value]) => (
+          <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '13px' }}>
+            <span style={{ color: 'var(--text2)' }}>{label}</span>
+            <span style={{ color: 'var(--text)', textAlign: 'right', fontWeight: 600 }}>{value}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 'auto', fontSize: '12px', color: 'var(--text2)', borderTop: '1px solid var(--border)', paddingTop: '9px', lineHeight: 1.45 }}>
+        ⚡ {insight}
+      </div>
+    </section>
+  )
+}
+
+const panelStyle = {
+  background: 'var(--card-bg)',
+  border: '1px solid var(--border)',
+  borderRadius: '12px',
+  padding: '14px',
+}
+
+const panelTitleStyle = {
+  fontSize: '13px',
+  fontWeight: 650,
+  marginBottom: '10px',
+}
+
+const thStyle = {
+  textAlign: 'left',
+  padding: '9px 7px',
+  color: 'var(--text3)',
+  fontSize: '11px',
+  fontWeight: 600,
+}
+
+const tdStyle = {
+  padding: '8px 7px',
+  fontSize: '12px',
+  color: 'var(--text)',
+}
+
+const metricSelectStyle = {
+  borderRadius: '8px',
+  border: '1px solid var(--border)',
+  background: 'var(--card-bg)',
+  color: 'var(--text)',
+  fontSize: '12px',
+  padding: '7px 10px',
+  outline: 'none',
+  cursor: 'pointer',
+}
+
+const metricButtonStyle = {
+  borderRadius: '8px',
+  border: '1px solid var(--border)',
+  background: 'var(--card-bg)',
+  color: 'var(--text2)',
+  fontSize: '12px',
+  padding: '7px 10px',
+  cursor: 'pointer',
+}
+
+const iconToggleStyle = {
+  border: 'none',
+  cursor: 'pointer',
+  fontSize: '13px',
+  padding: '7px 12px',
 }
