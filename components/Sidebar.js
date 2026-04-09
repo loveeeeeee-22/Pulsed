@@ -1,11 +1,9 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useTheme } from '@/lib/ThemeContext'
 
 export default function Sidebar({ isExpanded, onToggleExpand }) {
   const pathname = usePathname()
-  const { theme, toggleTheme } = useTheme()
   const accent = '#7C3AED'
 
   const links = [
@@ -163,77 +161,9 @@ export default function Sidebar({ isExpanded, onToggleExpand }) {
         display: 'flex',
         flexDirection: 'column',
         alignItems: isExpanded ? 'stretch' : 'center',
-        gap: '8px',
+        gap: '10px',
         width: '100%',
       }}>
-
-        {/* Theme toggle */}
-        <button
-          onClick={toggleTheme}
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          style={{
-            width: isExpanded ? '100%' : '36px',
-            height: '36px',
-            borderRadius: '8px',
-            border: '1px solid rgba(255,255,255,0.1)',
-            background: 'none',
-            color: 'rgba(255,255,255,0.3)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: isExpanded ? 'flex-start' : 'center',
-            gap: isExpanded ? '10px' : 0,
-            padding: isExpanded ? '0 10px' : 0,
-            transition: 'all 0.15s',
-          }}
-        >
-          {theme === 'dark' ? (
-            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-              <circle cx="7.5" cy="7.5" r="3" stroke="currentColor" strokeWidth="1.2"/>
-              <path d="M7.5 1v1.5M7.5 12.5V14M1 7.5h1.5M12.5 7.5H14M3 3l1 1M11 11l1 1M11 3l-1 1M3 11l1-1"
-                stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-            </svg>
-          ) : (
-            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-              <path d="M13 8.5A5.5 5.5 0 0 1 6.5 2a5.5 5.5 0 1 0 6.5 6.5Z"
-                stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-            </svg>
-          )}
-          {isExpanded && (
-            <span style={{ fontSize: '12px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-              {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-            </span>
-          )}
-        </button>
-
-        {/* Settings */}
-        <Link
-          href="/settings"
-          title="Settings"
-          style={{
-            width: isExpanded ? '100%' : '36px',
-            height: '36px',
-            borderRadius: '8px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: isExpanded ? 'flex-start' : 'center',
-            gap: isExpanded ? '10px' : 0,
-            padding: isExpanded ? '0 10px' : 0,
-            color: pathname?.startsWith('/settings') ? accent : 'rgba(255,255,255,0.3)',
-            background: pathname?.startsWith('/settings') ? `${accent}20` : 'transparent',
-            textDecoration: 'none',
-            transition: 'all 0.15s',
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.2"/>
-            <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"
-              stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-          </svg>
-          {isExpanded && (
-            <span style={{ fontSize: '12px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>Settings</span>
-          )}
-        </Link>
 
         {/* Avatar */}
         <div style={{

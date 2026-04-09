@@ -855,7 +855,17 @@ export default function Dashboard() {
           <button type="button" onClick={() => exportTradesCsv(filtered)} style={toolBtn}>
             Export CSV
           </button>
-          <Link href="/new-trade" style={toolBtn}>
+          <Link
+            href="/new-trade"
+            style={{
+              ...toolBtn,
+              background: accent,
+              color: '#fff',
+              borderColor: accent,
+              boxShadow: `0 8px 22px ${accent}55`,
+              fontWeight: 700,
+            }}
+          >
             + Log trade
           </Link>
           <Link href="/settings/brokers" style={toolBtn}>
