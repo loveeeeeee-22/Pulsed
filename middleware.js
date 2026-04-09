@@ -7,7 +7,7 @@ function maintenanceEnabled() {
   return s === 'true' || s === '1' || s === 'yes'
 }
 
-/** Public files like /PulsedEA.mq5 — last path segment looks like a static asset */
+/** /downloads/PulsedEA.mq5 etc. — matcher still runs for these */
 function isLikelyPublicAsset(pathname) {
   const last = pathname.split('/').pop() || ''
   if (!last.includes('.')) return false
@@ -18,13 +18,6 @@ export function middleware(request) {
   try {
     const { pathname } = request.nextUrl
 
-    // Never touch Next internals, APIs, or typical static paths (no fragile regex on Edge)
-    if (pathname.startsWith('/api') || pathname.startsWith('/_next')) {
-      return NextResponse.next()
-    }
-    if (pathname === '/favicon.ico' || pathname === '/icon.ico' || pathname === '/robots.txt' || pathname === '/sitemap.xml') {
-      return NextResponse.next()
-    }
     if (isLikelyPublicAsset(pathname)) {
       return NextResponse.next()
     }
@@ -50,11 +43,14 @@ export function middleware(request) {
     res.headers.set('Pragma', 'no-cache')
     return res
   } catch {
-    // If middleware ever throws on Edge, still serve the app
     return NextResponse.next()
   }
 }
 
+/**
+ * Do not run middleware on /api, any /_next/*, or /favicon.ico — avoids Edge touching JS chunks
+ * (redirecting those requests was breaking the app). See Next.js middleware matcher docs.
+ */
 export const config = {
-  matcher: '/:path*',
+  matcher: ['/', '/((?!api|_next|favicon.ico).*)'],
 }
