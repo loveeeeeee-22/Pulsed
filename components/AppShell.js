@@ -9,7 +9,9 @@ export default function AppShell({ children }) {
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false)
   const sidebarWidth = isSidebarExpanded ? 210 : 56
   const hideSidebar =
-    pathname === '/landing' || (typeof pathname === 'string' && pathname.startsWith('/auth'))
+    pathname === '/landing' ||
+    (typeof pathname === 'string' && pathname.startsWith('/auth')) ||
+    (typeof pathname === 'string' && pathname.startsWith('/maintenance'))
 
   useEffect(() => {
     if (pathname === '/subscription' || (pathname && pathname.startsWith('/settings'))) {
