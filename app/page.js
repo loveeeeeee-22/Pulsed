@@ -1,11 +1,13 @@
 'use client'
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { getAccountsForUser } from '@/lib/getAccountsForUser'
 import { getTradesForUser } from '@/lib/getTradesForUser'
 import { countTradesNeedingReview, isTradeReviewed } from '@/lib/tradeReviewStatus'
 import { getStrategiesForUser } from '@/lib/getStrategiesForUser'
+import { compareTradesChronoAsc } from '@/lib/tradeSort'
 import { useTheme } from '@/lib/ThemeContext'
+import NewTradeToast from '@/components/NewTradeToast'
 import Link from 'next/link'
 
 function formatDateTick(dateStr) {
@@ -195,6 +197,13 @@ export default function Dashboard() {
   const [timeRange, setTimeRange] = useState('all')
   const [strategyFilter, setStrategyFilter] = useState('all')
   const [dismissedReviewedBannerForKey, setDismissedReviewedBannerForKey] = useState('')
+  const [toastTrade, setToastTrade] = useState(null)
+
+  const dismissToast = useCallback(() => setToastTrade(null), [])
+
+  useEffect(() => {
+    if (!sessionUser?.id) setToastTrade(null)
+  }, [sessionUser?.id])
 
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', '#7C3AED')
@@ -237,6 +246,35 @@ export default function Dashboard() {
       const list = await getStrategiesForUser({ select: 'id, name' })
       setStrategies(Array.isArray(list) ? list : [])
     })()
+  }, [sessionUser?.id])
+
+  useEffect(() => {
+    if (!sessionUser?.id) return undefined
+
+    const channel = supabase
+      .channel('trades-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'trades',
+        },
+        (payload) => {
+          const row = payload.new
+          if (!row?.id) return
+          setTrades((prev) => {
+            if (prev.some((t) => t.id === row.id)) return prev
+            return [...prev, row].sort(compareTradesChronoAsc)
+          })
+          setToastTrade(row)
+        },
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [sessionUser?.id])
 
   async function fetchAccounts() {
@@ -1691,6 +1729,7 @@ export default function Dashboard() {
         </div>
       )}
 
+      <NewTradeToast trade={toastTrade} onClose={dismissToast} />
     </div>
   )
 }

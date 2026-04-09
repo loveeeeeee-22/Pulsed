@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { getAccountsForUser } from '@/lib/getAccountsForUser'
 import { getTradesForUser } from '@/lib/getTradesForUser'
+import { compareTradesChronoDesc } from '@/lib/tradeSort'
 import { getStrategiesForUser } from '@/lib/getStrategiesForUser'
 import { countTradesNeedingReview, isTradeReviewed } from '@/lib/tradeReviewStatus'
 import EditTradeModal from '@/components/EditTradeModal'
@@ -18,12 +19,51 @@ export default function TradeLog() {
   const [loading, setLoading] = useState(true)
   const [editTrade, setEditTrade] = useState(null)
   const [reviewTrade, setReviewTrade] = useState(null)
+  const [sessionUserId, setSessionUserId] = useState(null)
 
   useEffect(() => {
     fetchAccounts()
     fetchStrategies()
     fetchTrades()
   }, [])
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSessionUserId(session?.user?.id ?? null)
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSessionUserId(session?.user?.id ?? null)
+    })
+    return () => sub.subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (!sessionUserId) return undefined
+
+    const channel = supabase
+      .channel('trades-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'trades',
+        },
+        (payload) => {
+          const row = payload.new
+          if (!row?.id) return
+          setTrades((prev) => {
+            if (prev.some((t) => t.id === row.id)) return prev
+            return [...prev, row].sort(compareTradesChronoDesc)
+          })
+        },
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [sessionUserId])
 
   async function fetchAccounts() {
     const data = await getAccountsForUser()
