@@ -63,6 +63,12 @@ function SettingsItemIcon({ itemKey, active }) {
         <path d="M16 16l4 4" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
       </svg>
     ),
+    mt5: (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M4 18V6l4 8 4-6 4 5 4-7v14" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M4 18h16" stroke={color} strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+      </svg>
+    ),
     'close-account': (
       <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
@@ -105,6 +111,7 @@ export default function SettingsPage() {
       items: [
         { key: 'accounts', label: 'Accounts' },
         { key: 'brokers', label: 'Brokers', href: '/settings/brokers' },
+        { key: 'mt5', label: 'MT5 Connect', href: '/settings/mt5' },
         { key: 'trade-settings', label: 'Trade Settings' },
         { key: 'global-settings', label: 'Global Settings' },
       ],

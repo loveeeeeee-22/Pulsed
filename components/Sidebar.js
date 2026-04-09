@@ -57,6 +57,16 @@ export default function Sidebar({ isExpanded, onToggleExpand }) {
         </svg>
       )
     },
+    {
+      href: '/settings/mt5',
+      label: 'MT5 Connect',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 13V4l2.5 4L7 5l3 5 3.5-4v7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M2 13h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.45"/>
+        </svg>
+      )
+    },
   ]
 
   return (
