@@ -86,7 +86,8 @@ export default function SettingsPage() {
   const [logoutError, setLogoutError] = useState(null)
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--accent', '#7C3AED')
+    const lsAccent = typeof window !== 'undefined' ? window.localStorage.getItem('accentColor') : null
+    document.documentElement.style.setProperty('--accent', lsAccent || '#7C3AED')
   }, [])
 
   const groups = [

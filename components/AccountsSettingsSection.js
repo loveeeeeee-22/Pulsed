@@ -1,9 +1,57 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 const FREE_ACCOUNT_LIMIT = 5
+
+const ACCOUNT_COLORS = ['#7C3AED', '#2563EB', '#22C55E', '#F59E0B', '#EF4444', '#14B8A6', '#EC4899', '#64748B']
+const CURRENCIES = ['USD', 'GBP', 'EUR', 'ZAR', 'NGN', 'GHS']
+
+const BROKER_GROUPS = [
+  {
+    label: 'Futures Brokers',
+    options: [
+      'Tradovate',
+      'Rithmic / R Trader',
+      'NinjaTrader Brokerage',
+      'Optimus Futures',
+      'AMP Futures',
+      'TopStep (funded)',
+      'Apex Trader Funding (funded)',
+      'FTMO Futures (funded)',
+      'E8 Funding (funded)',
+      'My Funded Futures (funded)',
+      'Earn2Trade (funded)',
+    ],
+  },
+  {
+    label: 'Forex Brokers',
+    options: [
+      'FTMO (funded)',
+      'E8 Funding (funded)',
+      'The5%ers (funded)',
+      'Forex.com',
+      'OANDA',
+      'IC Markets',
+      'Pepperstone',
+      'XM',
+      'FP Markets',
+    ],
+  },
+  {
+    label: 'Crypto',
+    options: ['Binance', 'Coinbase', 'Kraken', 'Bybit', 'OKX'],
+  },
+  {
+    label: 'Stocks/Options',
+    options: ['Interactive Brokers', 'TD Ameritrade / thinkorswim', 'Charles Schwab', 'Webull', 'Tastytrade'],
+  },
+  {
+    label: 'Other',
+    options: ['Other'],
+  },
+]
 
 const inputStyle = {
   width: '100%',
@@ -27,18 +75,15 @@ const labelStyle = {
   letterSpacing: '0.06em',
 }
 
-const MARKET_TYPES = [
-  { value: 'futures', label: 'Futures' },
-  { value: 'crypto', label: 'Crypto' },
-  { value: 'forex', label: 'Forex' },
-]
-
 const emptyModal = {
   name: '',
   balance: '',
-  type: 'futures',
-  category: 'personal',
-  provider: '',
+  accountType: 'personal',
+  environment: 'live',
+  broker: '',
+  brokerOther: '',
+  currency: 'USD',
+  color: '#7C3AED',
 }
 
 export default function AccountsSettingsSection() {
@@ -54,9 +99,22 @@ export default function AccountsSettingsSection() {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [brokerSearch, setBrokerSearch] = useState('')
+  const [accent, setAccent] = useState('#7C3AED')
+
+  const filteredBrokerGroups = useMemo(() => {
+    const query = brokerSearch.trim().toLowerCase()
+    if (!query) return BROKER_GROUPS
+    return BROKER_GROUPS.map(group => ({
+      ...group,
+      options: group.options.filter(opt => opt.toLowerCase().includes(query)),
+    })).filter(group => group.options.length > 0)
+  }, [brokerSearch])
 
   const loadAccounts = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession()
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
     const uid = session?.user?.id
     if (!uid) {
       setAccounts([])
@@ -65,11 +123,7 @@ export default function AccountsSettingsSection() {
     }
     setListLoading(true)
     setListError('')
-    const { data, error } = await supabase
-      .from('accounts')
-      .select('*')
-      .eq('user_id', uid)
-      .order('name', { ascending: true })
+    const { data, error } = await supabase.from('accounts').select('*').eq('user_id', uid).order('name', { ascending: true })
 
     if (error) {
       if (error.message?.includes('column') && error.message?.includes('user_id')) {
@@ -88,9 +142,16 @@ export default function AccountsSettingsSection() {
   }, [])
 
   useEffect(() => {
+    const lsAccent = typeof window !== 'undefined' ? window.localStorage.getItem('accentColor') : null
+    setAccent(lsAccent || '#7C3AED')
+  }, [])
+
+  useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const { data: { session } } = await supabase.auth.getSession()
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
       if (!cancelled) {
         setSessionUser(session?.user ?? null)
         setAuthLoading(false)
@@ -115,7 +176,8 @@ export default function AccountsSettingsSection() {
 
   function openModal() {
     if (accounts.length >= FREE_ACCOUNT_LIMIT) return
-    setForm(emptyModal)
+    setForm({ ...emptyModal, color: accent || '#7C3AED' })
+    setBrokerSearch('')
     setSaveError('')
     setModalOpen(true)
   }
@@ -132,6 +194,7 @@ export default function AccountsSettingsSection() {
 
     const name = form.name.trim()
     const bal = parseFloat(String(form.balance).replace(/,/g, ''))
+    const broker = form.broker === 'Other' ? form.brokerOther.trim() : form.broker.trim()
     if (!name) {
       setSaveError('Please enter an account name.')
       return
@@ -140,12 +203,10 @@ export default function AccountsSettingsSection() {
       setSaveError('Please enter a valid starting balance.')
       return
     }
-    const provider = form.provider.trim()
-    if (!provider) {
-      setSaveError(form.category === 'prop' ? 'Please enter the prop firm name.' : 'Please enter your broker name.')
+    if (!broker) {
+      setSaveError('Please select a broker.')
       return
     }
-
     if (accounts.length >= FREE_ACCOUNT_LIMIT) {
       setSaveError(`Free plan allows up to ${FREE_ACCOUNT_LIMIT} accounts.`)
       return
@@ -155,18 +216,20 @@ export default function AccountsSettingsSection() {
     const { error } = await supabase.from('accounts').insert({
       name,
       balance: bal,
-      type: form.type,
-      category: form.category,
-      provider,
+      type: form.accountType,
+      category: form.accountType,
+      provider: broker,
+      broker,
+      environment: form.environment,
+      currency: form.currency || 'USD',
+      color: form.color || '#7C3AED',
       user_id: sessionUser.id,
     })
 
     setSaving(false)
     if (error) {
       if (error.message?.includes('user_id') || error.code === 'PGRST204') {
-        setSaveError(
-          'Saving failed: add the user_id column (see migration 20260403000000_accounts_user_category.sql) and try again.'
-        )
+        setSaveError('Saving failed: add the latest accounts columns and try again.')
       } else {
         setSaveError(error.message || 'Could not save account.')
       }
@@ -182,19 +245,13 @@ export default function AccountsSettingsSection() {
     if (!deleteTarget?.id || !sessionUser?.id) return
     setDeleteError('')
     setDeleting(true)
-    const { error } = await supabase
-      .from('accounts')
-      .delete()
-      .eq('id', deleteTarget.id)
-      .eq('user_id', sessionUser.id)
+    const { error } = await supabase.from('accounts').delete().eq('id', deleteTarget.id).eq('user_id', sessionUser.id)
 
     setDeleting(false)
     if (error) {
       const msg = error.message || ''
       if (/foreign key|violates|referenced/i.test(msg) || error.code === '23503') {
-        setDeleteError(
-          'This account still has trades linked to it. Delete or change those trades first, then try again.'
-        )
+        setDeleteError('This account still has trades linked to it. Delete or change those trades first, then try again.')
       } else {
         setDeleteError(msg || 'Could not delete account.')
       }
@@ -286,24 +343,20 @@ export default function AccountsSettingsSection() {
                 gap: '12px',
               }}
             >
-              <div style={{ flex: '1', minWidth: '160px' }}>
-                <div style={{ fontSize: '14px', color: 'var(--text)' }}>{a.name}</div>
+              <div style={{ flex: '1', minWidth: '180px' }}>
+                <div style={{ fontSize: '14px', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '10px', height: '10px', borderRadius: '999px', background: a.color || '#7C3AED', border: '1px solid rgba(255,255,255,0.24)' }} />
+                  {a.name}
+                </div>
                 <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', marginTop: '4px' }}>
-                  {a.category === 'prop' ? 'Prop' : 'Personal'}
-                  {a.provider ? ` · ${a.provider}` : ''}
-                  {a.type ? ` · ${String(a.type)}` : ''}
+                  {(a.category || a.type) === 'prop' ? 'Prop Firm Account' : 'Personal Account'}
+                  {(a.environment || 'live') === 'demo' ? ' · Demo' : ' · Live'}
+                  {(a.broker || a.provider) ? ` · ${a.broker || a.provider}` : ''}
                 </div>
               </div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  flexWrap: 'wrap',
-                }}
-              >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                 <div style={{ fontSize: '13px', fontFamily: 'monospace', color: 'var(--text2)' }}>
-                  Balance {formatMoney(a.balance)}
+                  Balance {formatMoney(a.balance, a.currency || 'USD')}
                 </div>
                 <button
                   type="button"
@@ -444,7 +497,7 @@ export default function AccountsSettingsSection() {
           <div
             style={{
               width: '100%',
-              maxWidth: '440px',
+              maxWidth: '580px',
               borderRadius: '14px',
               border: '1px solid var(--border)',
               background: 'var(--card-bg)',
@@ -489,78 +542,165 @@ export default function AccountsSettingsSection() {
                 />
               </div>
 
-              <div>
-                <label style={labelStyle} htmlFor="acc-balance">
-                  Starting balance
-                </label>
-                <input
-                  id="acc-balance"
-                  style={inputStyle}
-                  type="text"
-                  inputMode="decimal"
-                  value={form.balance}
-                  onChange={e => setForm(f => ({ ...f, balance: e.target.value }))}
-                  placeholder="0"
-                />
-              </div>
-
-              <div>
-                <label style={labelStyle} htmlFor="acc-type">
-                  Market type
-                </label>
-                <select
-                  id="acc-type"
-                  style={{ ...inputStyle, cursor: 'pointer' }}
-                  value={form.type}
-                  onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
-                >
-                  {MARKET_TYPES.map(m => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-                <p style={{ fontSize: '11px', color: 'var(--text3)', margin: '6px 0 0' }}>
-                  Used for symbol presets when logging trades.
-                </p>
-              </div>
-
               <fieldset style={{ border: 'none', margin: 0, padding: 0 }}>
-                <legend style={{ ...labelStyle, marginBottom: '8px' }}>Account kind</legend>
-                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: 'var(--text2)' }}>
-                    <input
-                      type="radio"
-                      name="acc-category"
-                      checked={form.category === 'personal'}
-                      onChange={() => setForm(f => ({ ...f, category: 'personal' }))}
-                    />
-                    Personal
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: 'var(--text2)' }}>
-                    <input
-                      type="radio"
-                      name="acc-category"
-                      checked={form.category === 'prop'}
-                      onChange={() => setForm(f => ({ ...f, category: 'prop' }))}
-                    />
-                    Prop firm
-                  </label>
+                <legend style={{ ...labelStyle, marginBottom: '8px' }}>Account type</legend>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, accountType: 'prop' }))}
+                    style={typeCardStyle(form.accountType === 'prop', accent)}
+                  >
+                    <span style={{ fontSize: '20px' }}>🏢</span>
+                    <span>
+                      <strong style={{ display: 'block', fontSize: '13px', color: 'var(--text)' }}>Prop Firm Account</strong>
+                      <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Funded or challenge account</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, accountType: 'personal' }))}
+                    style={typeCardStyle(form.accountType === 'personal', accent)}
+                  >
+                    <span style={{ fontSize: '20px' }}>👤</span>
+                    <span>
+                      <strong style={{ display: 'block', fontSize: '13px', color: 'var(--text)' }}>Personal Account</strong>
+                      <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Self-funded trading account</span>
+                    </span>
+                  </button>
                 </div>
               </fieldset>
 
               <div>
-                <label style={labelStyle} htmlFor="acc-provider">
-                  {form.category === 'prop' ? 'Prop firm name' : 'Broker'}
+                <span style={labelStyle}>Environment</span>
+                <div style={{ display: 'inline-flex', borderRadius: '999px', border: '1px solid var(--border)', overflow: 'hidden' }}>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, environment: 'live' }))}
+                    style={{
+                      border: 'none',
+                      background: form.environment === 'live' ? 'rgba(34,197,94,0.18)' : 'var(--bg3)',
+                      color: form.environment === 'live' ? PROFIT_TEXT : 'var(--text2)',
+                      padding: '8px 14px',
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Live / Real
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, environment: 'demo' }))}
+                    style={{
+                      border: 'none',
+                      borderLeft: '1px solid var(--border)',
+                      background: form.environment === 'demo' ? 'rgba(148,163,184,0.2)' : 'var(--bg3)',
+                      color: form.environment === 'demo' ? 'var(--text)' : 'var(--text2)',
+                      padding: '8px 14px',
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Demo / Simulation
+                  </button>
+                </div>
+                {form.environment === 'demo' ? (
+                  <p style={{ fontSize: '11px', color: 'var(--text3)', margin: '7px 0 0' }}>
+                    Demo accounts are excluded from your main statistics by default
+                  </p>
+                ) : null}
+              </div>
+
+              <div>
+                <label style={labelStyle} htmlFor="broker-search">
+                  Broker
                 </label>
                 <input
-                  id="acc-provider"
-                  style={inputStyle}
-                  value={form.provider}
-                  onChange={e => setForm(f => ({ ...f, provider: e.target.value }))}
-                  placeholder={form.category === 'prop' ? 'e.g. FTMO' : 'e.g. Interactive Brokers'}
-                  autoComplete="organization"
+                  id="broker-search"
+                  style={{ ...inputStyle, marginBottom: '8px' }}
+                  value={brokerSearch}
+                  onChange={e => setBrokerSearch(e.target.value)}
+                  placeholder="Search broker list..."
                 />
+                <select
+                  style={{ ...inputStyle, cursor: 'pointer' }}
+                  value={form.broker}
+                  onChange={e => setForm(f => ({ ...f, broker: e.target.value }))}
+                >
+                  <option value="">Select a broker</option>
+                  {filteredBrokerGroups.map(group => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.options.map(option => (
+                        <option key={`${group.label}-${option}`} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                {form.broker === 'Other' ? (
+                  <input
+                    style={{ ...inputStyle, marginTop: '8px' }}
+                    value={form.brokerOther}
+                    onChange={e => setForm(f => ({ ...f, brokerOther: e.target.value }))}
+                    placeholder="Enter broker name"
+                  />
+                ) : null}
+              </div>
+
+              <div>
+                <label style={labelStyle} htmlFor="acc-balance">
+                  Starting Account Balance
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: '8px' }}>
+                  <input
+                    id="acc-balance"
+                    style={inputStyle}
+                    type="text"
+                    inputMode="decimal"
+                    value={form.balance}
+                    onChange={e => setForm(f => ({ ...f, balance: e.target.value }))}
+                    placeholder="e.g. 100000"
+                  />
+                  <select
+                    value={form.currency}
+                    onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
+                    style={{ ...inputStyle, cursor: 'pointer' }}
+                  >
+                    {CURRENCIES.map(cur => (
+                      <option key={cur} value={cur}>
+                        {cur}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p style={{ fontSize: '11px', color: 'var(--text3)', margin: '6px 0 0' }}>
+                  This is used to calculate your account growth percentage
+                </p>
+              </div>
+
+              <div>
+                <span style={labelStyle}>Account color</span>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {ACCOUNT_COLORS.map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setForm(f => ({ ...f, color: c }))}
+                      title={c}
+                      style={{
+                        width: '22px',
+                        height: '22px',
+                        borderRadius: '999px',
+                        border: form.color === c ? '2px solid #fff' : '1px solid rgba(255,255,255,0.2)',
+                        boxShadow: form.color === c ? `0 0 0 2px ${accent}` : 'none',
+                        background: c,
+                        cursor: 'pointer',
+                      }}
+                    />
+                  ))}
+                </div>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
@@ -607,9 +747,35 @@ export default function AccountsSettingsSection() {
   )
 }
 
-function formatMoney(v) {
+const PROFIT_TEXT = '#22C55E'
+
+function formatMoney(v, currency = 'USD') {
   if (v == null || v === '') return '—'
   const n = Number(v)
   if (!Number.isFinite(n)) return String(v)
-  return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(n)
+  } catch {
+    return `${currency} ${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+  }
+}
+
+function typeCardStyle(active, accent) {
+  return {
+    borderRadius: '10px',
+    border: active ? `1px solid ${accent}` : '1px solid var(--border)',
+    background: active ? 'var(--accent-subtle)' : 'var(--bg3)',
+    color: 'var(--text2)',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    textAlign: 'left',
+    padding: '10px',
+  }
 }
