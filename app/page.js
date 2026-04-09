@@ -194,7 +194,7 @@ export default function Dashboard() {
   const [journalFilter, setJournalFilter] = useState('all')
   const [timeRange, setTimeRange] = useState('all')
   const [strategyFilter, setStrategyFilter] = useState('all')
-  const [hideReviewedBanner, setHideReviewedBanner] = useState(false)
+  const [dismissedReviewedBannerForKey, setDismissedReviewedBannerForKey] = useState('')
 
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', '#7C3AED')
@@ -385,10 +385,27 @@ export default function Dashboard() {
   const todayWins = todayTrades.filter(t => t.status === 'Win')
   const dayWinRate = todayTrades.length ? ((todayWins.length / todayTrades.length) * 100).toFixed(0) : '0'
   const pendingReviewCount = countTradesNeedingReview(filtered)
+  const latestLoggedTradeKey = useMemo(() => {
+    if (!trades.length) return 'none'
+    let latestStamp = ''
+    let latestId = ''
+    for (const t of trades) {
+      const stamp = String(t.created_at || t.date || '')
+      if (stamp >= latestStamp) {
+        latestStamp = stamp
+        latestId = String(t.id || '')
+      }
+    }
+    return `${latestStamp}:${latestId}`
+  }, [trades])
 
   useEffect(() => {
-    if (pendingReviewCount > 0) setHideReviewedBanner(false)
-  }, [pendingReviewCount])
+    if (typeof window === 'undefined') return
+    const stored = window.localStorage.getItem('dashboardReviewedBannerDismissedFor')
+    if (stored) setDismissedReviewedBannerForKey(stored)
+  }, [])
+
+  const hideReviewedBanner = dismissedReviewedBannerForKey === latestLoggedTradeKey
 
   const longTrades = filtered.filter(t => directionIsLong(t.direction))
   const shortTrades = filtered.filter(t => directionIsShort(t.direction))
@@ -964,7 +981,12 @@ export default function Dashboard() {
               </Link>
               <button
                 type="button"
-                onClick={() => setHideReviewedBanner(true)}
+                onClick={() => {
+                  setDismissedReviewedBannerForKey(latestLoggedTradeKey)
+                  if (typeof window !== 'undefined') {
+                    window.localStorage.setItem('dashboardReviewedBannerDismissedFor', latestLoggedTradeKey)
+                  }
+                }}
                 aria-label="Dismiss all reviewed message"
                 style={{
                   fontSize: '12px',
