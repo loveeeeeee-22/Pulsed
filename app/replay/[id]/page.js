@@ -1,10 +1,41 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
-import { createChart, CandlestickSeries } from 'lightweight-charts'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import {
+  createChart,
+  CandlestickSeries,
+  HistogramSeries,
+  createSeriesMarkers,
+} from 'lightweight-charts'
 import { supabase } from '@/lib/supabase'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { calculateReplayPnl, getInstrumentSpec } from '@/lib/instrumentSpecs'
+
+function padTimePart(t) {
+  const parts = String(t || '09:30').trim().split(':')
+  const hh = String(Number(parts[0]) || 0).padStart(2, '0')
+  const mm = String(Number(parts[1]) || 0).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
+function tradeTimeToUnixSec(dateStr, timeStr) {
+  return new Date(`${dateStr}T${padTimePart(timeStr)}:00`).getTime() / 1000
+}
+
+function tradingViewChartUrl(symbol) {
+  const raw = String(symbol || '').trim().toUpperCase()
+  const compact = raw.replace(/[^A-Z0-9]/g, '')
+  const map = {
+    XAUUSD: 'FOREXCOM:XAUUSD',
+    XAGUSD: 'FOREXCOM:XAGUSD',
+    EURUSD: 'FX_IDC:EURUSD',
+    GBPUSD: 'FX_IDC:GBPUSD',
+    USDJPY: 'FX_IDC:USDJPY',
+  }
+  const tv = map[compact] || (compact.length >= 6 ? `FX_IDC:${compact}` : `NASDAQ:${compact}`)
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tv)}`
+}
 
 export default function TradeReplayPage() {
   const params = useParams()
@@ -20,15 +51,37 @@ export default function TradeReplayPage() {
   const [speed, setSpeed] = useState(10) // 1x, 5x, 10x, 50x
   const [currentIndex, setCurrentIndex] = useState(0)
   const [runningPnl, setRunningPnl] = useState(0)
+  const [entryBarIdx, setEntryBarIdx] = useState(0)
+  const [exitBarIdx, setExitBarIdx] = useState(0)
 
   const chartContainerRef = useRef()
   const chartRef = useRef()
   const candlestickSeriesRef = useRef()
-  const entryMarkerRef = useRef()
-  const exitMarkerRef = useRef()
-  
-  // Timer ref for playback
+  const volumeSeriesRef = useRef()
+  const markersPluginRef = useRef()
   const playbackRef = useRef(null)
+  /** Index to show when chart is (re)built — avoids depending on currentIndex in the chart effect */
+  const chartBuildIndexRef = useRef(0)
+
+  const replayPnlAtIndex = useCallback((t, candleRows, idx, entryIdx, exitIdx) => {
+    if (!t || !candleRows.length || idx < 0 || entryIdx < 0) return 0
+    if (idx < entryIdx) return 0
+    const spec = getInstrumentSpec({ symbol: t.symbol })
+    const exitPx = Number(t.exit_price)
+    const hasExit = Number.isFinite(exitPx) && exitPx > 0
+    let markPrice = candleRows[idx]?.close
+    if (exitIdx >= 0 && idx >= exitIdx) {
+      markPrice = hasExit ? exitPx : candleRows[exitIdx]?.close
+    }
+    if (!Number.isFinite(markPrice)) return 0
+    return calculateReplayPnl({
+      entryPrice: t.entry_price,
+      currentPrice: markPrice,
+      contracts: t.contracts,
+      direction: t.direction,
+      spec,
+    })
+  }, [])
 
   useEffect(() => {
     async function loadData() {
@@ -73,32 +126,15 @@ export default function TradeReplayPage() {
           throw new Error('No candle data returned for this timeframe.')
         }
 
-        // Format for lightweight-charts
+        // Format for lightweight-charts (no synthetic rescaling — that warped real price action vs your journal)
         let formatted = data.candles.map(c => ({
           time: new Date(c.time).getTime() / 1000,
           open: c.open,
           high: c.high,
           low: c.low,
-          close: c.close
+          close: c.close,
+          volume: Number(c.volume) || 0,
         }))
-
-        // Auto-scale fallback ETFs to CFD scale
-        if (formatted.length > 0 && tData.entry_price) {
-          const entryPrice = Number(tData.entry_price)
-          const firstClose = formatted[0].close
-          if (entryPrice > 0 && firstClose > 0) {
-            const ratio = entryPrice / firstClose
-            if (ratio > 1.5 || ratio < 0.6) {
-              const scale = Math.round(ratio) // usually ~10 or ~100
-              formatted.forEach(c => {
-                c.open *= scale
-                c.high *= scale
-                c.low *= scale
-                c.close *= scale
-              })
-            }
-          }
-        }
 
         // Deduplicate timestamps (lightweight-charts throws if there are duplicates)
         const seen = new Set()
@@ -110,19 +146,34 @@ export default function TradeReplayPage() {
 
         // Sort ascending
         formatted.sort((a, b) => a.time - b.time)
-        setCandles(formatted)
-        
-        // Find rough starting point index (a bit before the entry time)
-        // Remove 'Z' to parse in same local timezone context as the candles
-        const entryTarget = new Date(`${tData.date}T${tData.entry_time || '09:30'}:00`).getTime() / 1000
-        let sIdx = 0
+
+        const entryTarget = tradeTimeToUnixSec(tData.date, tData.entry_time || '09:30')
+        let eIdx = 0
         for (let i = 0; i < formatted.length; i++) {
           if (formatted[i].time >= entryTarget) {
-            sIdx = Math.max(0, i - 15) // start 15 min before entry
+            eIdx = i
             break
           }
         }
-        if (sIdx === 0 && formatted.length > 50) sIdx = 10;
+
+        let xIdx = formatted.length - 1
+        if (tData.exit_time) {
+          const exitTarget = tradeTimeToUnixSec(tData.date, tData.exit_time)
+          for (let i = 0; i < formatted.length; i++) {
+            if (formatted[i].time >= exitTarget) {
+              xIdx = i
+              break
+            }
+          }
+        }
+
+        setEntryBarIdx(eIdx)
+        setExitBarIdx(xIdx)
+        setCandles(formatted)
+
+        let sIdx = Math.max(0, eIdx - 15)
+        if (sIdx === 0 && formatted.length > 50) sIdx = 10
+        chartBuildIndexRef.current = sIdx
         setCurrentIndex(sIdx)
 
       } catch (err) {
@@ -135,9 +186,14 @@ export default function TradeReplayPage() {
     if (tradeId) loadData()
   }, [tradeId])
 
+  useEffect(() => {
+    if (loading || !trade || candles.length === 0) return
+    setRunningPnl(replayPnlAtIndex(trade, candles, currentIndex, entryBarIdx, exitBarIdx))
+  }, [loading, trade, candles, currentIndex, entryBarIdx, exitBarIdx, replayPnlAtIndex])
+
   // Initialize chart
   useEffect(() => {
-    if (loading || error || candles.length === 0 || !chartContainerRef.current) return
+    if (loading || error || candles.length === 0 || !chartContainerRef.current || !trade) return
 
     const chart = createChart(chartContainerRef.current, {
       layout: {
@@ -167,37 +223,112 @@ export default function TradeReplayPage() {
       wickDownColor: '#EF4444',
     })
 
+    const volSeries = chart.addSeries(
+      HistogramSeries,
+      {
+        color: 'rgba(59, 130, 246, 0.45)',
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+      },
+      1
+    )
+
     chartRef.current = chart
     candlestickSeriesRef.current = series
+    volumeSeriesRef.current = volSeries
 
-    // Set initial visible candles up to currentIndex
-    series.setData(candles.slice(0, Math.max(currentIndex + 1, 1)))
-    
-    // Add SL / TP lines if they exist
-    if (trade?.stop_loss) {
+    const sliceEnd = Math.max(chartBuildIndexRef.current + 1, 1)
+    const vis = candles.slice(0, sliceEnd)
+    series.setData(vis)
+    volSeries.setData(
+      vis.map(c => ({
+        time: c.time,
+        value: c.volume,
+        color: c.close >= c.open ? 'rgba(34, 197, 94, 0.35)' : 'rgba(239, 68, 68, 0.35)',
+      }))
+    )
+
+    const entryPx = Number(trade.entry_price)
+    const exitPx = Number(trade.exit_price)
+    const eIdx = entryBarIdx
+    const xIdx = exitBarIdx
+
+    if (Number.isFinite(entryPx) && entryPx > 0) {
+      series.createPriceLine({
+        price: entryPx,
+        color: '#22C55E',
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: 'Entry',
+      })
+    }
+    if (Number.isFinite(exitPx) && exitPx > 0) {
+      series.createPriceLine({
+        price: exitPx,
+        color: '#A855F7',
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: 'Exit',
+      })
+    }
+
+    if (trade.stop_loss) {
       series.createPriceLine({
         price: Number(trade.stop_loss),
         color: '#EF4444',
         lineWidth: 2,
-        lineStyle: 2, // Dashed
+        lineStyle: 2,
         axisLabelVisible: true,
         title: 'SL',
       })
     }
-    if (trade?.take_profit) {
+    if (trade.take_profit) {
       series.createPriceLine({
         price: Number(trade.take_profit),
         color: '#3B82F6',
         lineWidth: 2,
-        lineStyle: 1, // Dotted
+        lineStyle: 1,
         axisLabelVisible: true,
         title: 'TP',
       })
     }
-    
+
+    const markerItems = []
+    if (eIdx >= 0 && eIdx < candles.length && Number.isFinite(entryPx) && entryPx > 0) {
+      markerItems.push({
+        time: candles[eIdx].time,
+        position: 'atPriceMiddle',
+        shape: 'arrowUp',
+        color: '#22C55E',
+        price: entryPx,
+        text: 'Entry',
+        size: 1.5,
+      })
+    }
+    if (
+      xIdx >= 0 &&
+      xIdx < candles.length &&
+      xIdx !== eIdx &&
+      (Number.isFinite(exitPx) && exitPx > 0 || Number.isFinite(candles[xIdx]?.close))
+    ) {
+      markerItems.push({
+        time: candles[xIdx].time,
+        position: 'atPriceMiddle',
+        shape: 'arrowDown',
+        color: '#A855F7',
+        price: Number.isFinite(exitPx) && exitPx > 0 ? exitPx : candles[xIdx].close,
+        text: 'Exit',
+        size: 1.5,
+      })
+    }
+
+    const markersApi = createSeriesMarkers(series, markerItems)
+    markersPluginRef.current = markersApi
+
     chart.timeScale().fitContent()
 
-    // First paint can still be 0×0 before flex/absolute layout settles; resize once layout is known.
     const layoutFrame = requestAnimationFrame(() => {
       const el = chartContainerRef.current
       if (!el) return
@@ -209,17 +340,26 @@ export default function TradeReplayPage() {
 
     return () => {
       cancelAnimationFrame(layoutFrame)
+      if (markersPluginRef.current) {
+        try {
+          markersPluginRef.current.detach()
+        } catch (_) {
+          /* ignore */
+        }
+        markersPluginRef.current = null
+      }
       chart.remove()
       chartRef.current = null
       candlestickSeriesRef.current = null
+      volumeSeriesRef.current = null
     }
-  }, [loading, error, candles]) // Note: intentionally don't re-run on currentIndex to avoid recreating chart
+  }, [loading, error, candles, trade, entryBarIdx, exitBarIdx])
 
   // Playback loop
   useEffect(() => {
     if (isPlaying) {
       const msPerTick = speed === 1 ? 1000 : speed === 5 ? 200 : speed === 10 ? 100 : 20
-      
+
       playbackRef.current = setInterval(() => {
         setCurrentIndex(prev => {
           if (prev >= candles.length - 1) {
@@ -227,26 +367,19 @@ export default function TradeReplayPage() {
             return prev
           }
           const nextIdx = prev + 1
-          
-          // Update chart
-          if (candlestickSeriesRef.current) {
-            const nextCandle = candles[nextIdx]
+          const nextCandle = candles[nextIdx]
+          if (candlestickSeriesRef.current && nextCandle) {
             candlestickSeriesRef.current.update(nextCandle)
-            
-            // Re-calculate running P&L if within trade bounds
-            if (trade && trade.entry_price && trade.direction) {
-              const eTime = new Date(`${trade.date}T${trade.entry_time || '09:30'}:00`).getTime() / 1000
-              const xTime = trade.exit_time ? new Date(`${trade.date}T${trade.exit_time}:00`).getTime() / 1000 : Infinity
-              
-              if (nextCandle.time >= eTime && nextCandle.time <= xTime) {
-                const diff = (nextCandle.close - trade.entry_price) / trade.entry_price
-                const pos = trade.direction.toLowerCase() === 'long' ? 1 : -1
-                const riskOrContracts = Number(trade.contracts) || 1
-                // Rough estimate based on points/contracts if precise math isn't available
-                const estPnl = diff * pos * 100000 * riskOrContracts // very rough!
-                setRunningPnl(estPnl)
-              }
-            }
+          }
+          if (volumeSeriesRef.current && nextCandle) {
+            volumeSeriesRef.current.update({
+              time: nextCandle.time,
+              value: nextCandle.volume,
+              color:
+                nextCandle.close >= nextCandle.open
+                  ? 'rgba(34, 197, 94, 0.35)'
+                  : 'rgba(239, 68, 68, 0.35)',
+            })
           }
           return nextIdx
         })
@@ -256,14 +389,23 @@ export default function TradeReplayPage() {
     }
 
     return () => clearInterval(playbackRef.current)
-  }, [isPlaying, speed, candles, trade])
+  }, [isPlaying, speed, candles])
 
-  // Scrubbing handler
   const handleScrub = (e) => {
     const val = Number(e.target.value)
     setCurrentIndex(val)
+    const vis = candles.slice(0, val + 1)
     if (candlestickSeriesRef.current) {
-      candlestickSeriesRef.current.setData(candles.slice(0, val + 1))
+      candlestickSeriesRef.current.setData(vis)
+    }
+    if (volumeSeriesRef.current) {
+      volumeSeriesRef.current.setData(
+        vis.map(c => ({
+          time: c.time,
+          value: c.volume,
+          color: c.close >= c.open ? 'rgba(34, 197, 94, 0.35)' : 'rgba(239, 68, 68, 0.35)',
+        }))
+      )
     }
   }
 
@@ -323,6 +465,33 @@ export default function TradeReplayPage() {
           </span>
         </div>
       </header>
+
+      <div
+        style={{
+          padding: '8px 24px',
+          fontSize: '12px',
+          color: 'var(--text3)',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '16px',
+          flexWrap: 'wrap',
+          lineHeight: 1.45,
+        }}
+      >
+        <span>
+          Indicators and the full TradingView drawing toolbar live in TradingView’s licensed Charting Library, not in Lightweight Charts. This replay shows candles, volume, entry/exit, and SL/TP from your journal.
+        </span>
+        <a
+          href={tradingViewChartUrl(trade?.symbol)}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ flexShrink: 0, color: '#3B82F6', fontWeight: 600, textDecoration: 'none' }}
+        >
+          Open on TradingView →
+        </a>
+      </div>
 
       {/* Main Chart Area — flex + height:100% often yields 0px; absolute inset fills the flex slot */}
       <main style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>

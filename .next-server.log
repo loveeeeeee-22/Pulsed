@@ -192,3 +192,91 @@ https://react.dev/link/hydration-mismatch
 ○ Compiling / ...
  GET / 200 in 20.9s (next.js: 19.2s, proxy.ts: 562ms, application-code: 1128ms)
  GET / 200 in 1717ms (next.js: 40ms, proxy.ts: 26ms, application-code: 1650ms)
+[browser] The final argument passed to useEffect changed size between renders. The order and size of this array must remain constant.
+
+Previous: [false, invalid input syntax for type uuid: "1", ]
+Incoming: [false, invalid input syntax for type uuid: "1", , , 0, 0, 0] 
+    at TradeReplayPage (app/replay/[id]/page.js:192:12)
+  190 |
+  191 |   // Initialize chart
+> 192 |   useEffect(() => {
+      |            ^
+  193 |     if (loading || error || candles.length === 0 || !chartContainerRef.current || !trade)...
+  194 |
+  195 |     const chart = createChart(chartContainerRef.current, { (app/replay/[id]/page.js:192:12)
+[browser] The final argument passed to useEffect changed size between renders. The order and size of this array must remain constant.
+
+Previous: [false, invalid input syntax for type uuid: "1", , , 0, 0, 0]
+Incoming: [false, invalid input syntax for type uuid: "1", , , 0, 0] 
+    at TradeReplayPage (app/replay/[id]/page.js:195:12)
+  193 |
+  194 |   // Initialize chart
+> 195 |   useEffect(() => {
+      |            ^
+  196 |     if (loading || error || candles.length === 0 || !chartContainerRef.current || !trade)...
+  197 |
+  198 |     const chart = createChart(chartContainerRef.current, { (app/replay/[id]/page.js:195:12)
+[browser] The final argument passed to useEffect changed size between renders. The order and size of this array must remain constant.
+
+Previous: [false, 10, , ]
+Incoming: [false, 10, , , 0, 0, (t, candleRows, idx, entryIdx, exitIdx)=>{
+            if (!t || !candleRows.length || idx < 0 || entryIdx < 0) return 0;
+            if (idx < entryIdx) return 0;
+            const spec = (0,_lib_instrumentSpecs__WEBPACK_IMPORTED_MODULE_6__.getInstrumentSpec)({
+                symbol: t.symbol
+            });
+            const exitPx = Number(t.exit_price);
+            const hasExit = Number.isFinite(exitPx) && exitPx > 0;
+            let markPrice = candleRows[idx]?.close;
+            if (exitIdx >= 0 && idx >= exitIdx) {
+                markPrice = hasExit ? exitPx : candleRows[exitIdx]?.close;
+            }
+            if (!Number.isFinite(markPrice)) return 0;
+            return (0,_lib_instrumentSpecs__WEBPACK_IMPORTED_MODULE_6__.calculateReplayPnl)({
+                entryPrice: t.entry_price,
+                currentPrice: markPrice,
+                contracts: t.contracts,
+                direction: t.direction,
+                spec
+            });
+        }] 
+    at TradeReplayPage (app/replay/[id]/page.js:359:12)
+  357 |
+  358 |   // Playback loop
+> 359 |   useEffect(() => {
+      |            ^
+  360 |     if (isPlaying) {
+  361 |       const msPerTick = speed === 1 ? 1000 : speed === 5 ? 200 : speed === 10 ? 100 : 20
+  362 | (app/replay/[id]/page.js:359:12)
+[browser] The final argument passed to useEffect changed size between renders. The order and size of this array must remain constant.
+
+Previous: [false, 10, , , 0, 0, (t, candleRows, idx, entryIdx, exitIdx)=>{
+            if (!t || !candleRows.length || idx < 0 || entryIdx < 0) return 0;
+            if (idx < entryIdx) return 0;
+            const spec = (0,_lib_instrumentSpecs__WEBPACK_IMPORTED_MODULE_6__.getInstrumentSpec)({
+                symbol: t.symbol
+            });
+            const exitPx = Number(t.exit_price);
+            const hasExit = Number.isFinite(exitPx) && exitPx > 0;
+            let markPrice = candleRows[idx]?.close;
+            if (exitIdx >= 0 && idx >= exitIdx) {
+                markPrice = hasExit ? exitPx : candleRows[exitIdx]?.close;
+            }
+            if (!Number.isFinite(markPrice)) return 0;
+            return (0,_lib_instrumentSpecs__WEBPACK_IMPORTED_MODULE_6__.calculateReplayPnl)({
+                entryPrice: t.entry_price,
+                currentPrice: markPrice,
+                contracts: t.contracts,
+                direction: t.direction,
+                spec
+            });
+        }]
+Incoming: [false, 10, ] 
+    at TradeReplayPage (app/replay/[id]/page.js:359:12)
+  357 |
+  358 |   // Playback loop
+> 359 |   useEffect(() => {
+      |            ^
+  360 |     if (isPlaying) {
+  361 |       const msPerTick = speed === 1 ? 1000 : speed === 5 ? 200 : speed === 10 ? 100 : 20
+  362 | (app/replay/[id]/page.js:359:12)
