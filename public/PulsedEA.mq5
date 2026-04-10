@@ -12,15 +12,47 @@ input string ApiKey = "";        // Your Pulsed API Key
 input string AccountId = "";     // Your Pulsed Account ID  
 input string ServerUrl = "https://pulsed-ochre.vercel.app"; // Server URL
 
-// Track which tickets we have already sent
-int sentTickets[];
+string g_serverUrl = "";
+
+// Track which closing deal tickets we have already sent (HistoryDealGetTicket — ulong)
+ulong sentTickets[];
+
+//+------------------------------------------------------------------+
+//| JSON string escaping (StringFormat breaks on % in comments, etc.) |
+//+------------------------------------------------------------------+
+string JsonEscape(string s)
+{
+   StringReplace(s, "\\", "\\\\");
+   StringReplace(s, "\"", "\\\"");
+   StringReplace(s, "\r", "\\r");
+   StringReplace(s, "\n", "\\n");
+   return s;
+}
+
+// Deal tickets are ulong — never cast to int (overflow). Emit digits for JSON number.
+string UlongTicketJson(ulong t)
+{
+   return StringFormat("%I64u", t);
+}
+
+string TrimUrl(string u)
+{
+   while(StringLen(u) > 0 && StringGetCharacter(u, StringLen(u) - 1) == ' ')
+      u = StringSubstr(u, 0, StringLen(u) - 1);
+   while(StringLen(u) > 0 && StringGetCharacter(u, 0) == ' ')
+      u = StringSubstr(u, 1);
+   while(StringLen(u) > 0 && StringGetCharacter(u, StringLen(u) - 1) == '/')
+      u = StringSubstr(u, 0, StringLen(u) - 1);
+   return u;
+}
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                             |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print("PulsedEA initialized. Server: ", ServerUrl);
+   g_serverUrl = TrimUrl(ServerUrl);
+   Print("PulsedEA initialized. Server: ", g_serverUrl);
    
    // Load previously sent tickets from file
    LoadSentTickets();
@@ -61,7 +93,7 @@ void CheckForNewClosedTrades()
       if(dealEntry != DEAL_ENTRY_OUT) continue;
       
       // Check if we already sent this ticket
-      if(AlreadySent((int)ticket)) continue;
+      if(AlreadySent(ticket)) continue;
       
       // Get deal details
       string symbol    = HistoryDealGetString(ticket, DEAL_SYMBOL);
@@ -107,52 +139,37 @@ void CheckForNewClosedTrades()
       StringReplace(openTimeStr, ".", "-");
       StringReplace(closeTimeStr, ".", "-");
       
-      // Build JSON payload
-      string json = StringFormat(
-         "{"
-         "\"api_key\":\"%s\","
-         "\"account_id\":\"%s\","
-         "\"ticket\":%d,"
-         "\"symbol\":\"%s\","
-         "\"type\":\"%s\","
-         "\"volume\":%.2f,"
-         "\"open_price\":%.5f,"
-         "\"close_price\":%.5f,"
-         "\"open_time\":\"%s\","
-         "\"close_time\":\"%s\","
-         "\"profit\":%.2f,"
-         "\"commission\":%.2f,"
-         "\"swap\":%.2f,"
-         "\"magic_number\":%d,"
-         "\"comment\":\"%s\""
-         "}",
-         ApiKey,
-         AccountId,
-         (int)ticket,
-         symbol,
-         dealDirection,
-         volume,
-         openPrice,
-         price,
-         openTimeStr,
-         closeTimeStr,
-         profit,
-         commission,
-         swap,
-         (int)HistoryDealGetInteger(ticket, DEAL_MAGIC),
-         HistoryDealGetString(ticket, DEAL_COMMENT)
-      );
+      // Build JSON without StringFormat on user-controlled strings (% / " break the payload).
+      string comment = HistoryDealGetString(ticket, DEAL_COMMENT);
+      long magic = HistoryDealGetInteger(ticket, DEAL_MAGIC);
+      string json = "{";
+      json += "\"api_key\":\"" + JsonEscape(ApiKey) + "\",";
+      json += "\"account_id\":\"" + JsonEscape(AccountId) + "\",";
+      json += "\"ticket\":" + UlongTicketJson(ticket) + ",";
+      json += "\"symbol\":\"" + JsonEscape(symbol) + "\",";
+      json += "\"type\":\"" + dealDirection + "\",";
+      json += "\"volume\":" + DoubleToString(volume, 2) + ",";
+      json += "\"open_price\":" + DoubleToString(openPrice, 5) + ",";
+      json += "\"close_price\":" + DoubleToString(price, 5) + ",";
+      json += "\"open_time\":\"" + openTimeStr + "\",";
+      json += "\"close_time\":\"" + closeTimeStr + "\",";
+      json += "\"profit\":" + DoubleToString(profit, 2) + ",";
+      json += "\"commission\":" + DoubleToString(commission, 2) + ",";
+      json += "\"swap\":" + DoubleToString(swap, 2) + ",";
+      json += "\"magic_number\":" + StringFormat("%I64d", magic) + ",";
+      json += "\"comment\":\"" + JsonEscape(comment) + "\"";
+      json += "}";
       
       // Send to Pulsed API
-      string endpoint = ServerUrl + "/api/mt5/sync";
-      SendTrade(endpoint, json, (int)ticket);
+      string endpoint = g_serverUrl + "/api/mt5/sync";
+      SendTrade(endpoint, json, ticket);
    }
 }
 
 //+------------------------------------------------------------------+
 //| Send trade data to Pulsed API                                    |
 //+------------------------------------------------------------------+
-void SendTrade(string url, string json, int ticket)
+void SendTrade(string url, string json, ulong ticket)
 {
    char post[];
    char result[];
@@ -178,17 +195,16 @@ void SendTrade(string url, string json, int ticket)
    if(response == 200 || response == 201)
    {
       string responseStr = CharArrayToString(result);
-      Print("Pulsed: Trade sent successfully. Ticket: ", ticket, 
+      Print("Pulsed: Trade sent successfully. Ticket: ", UlongTicketJson(ticket),
             " Response: ", responseStr);
       
-      // Mark this ticket as sent
       MarkAsSent(ticket);
    }
    else if(response == -1)
    {
       Print("Pulsed: WebRequest failed. Make sure to allow WebRequests in:");
       Print("MT5 → Tools → Options → Expert Advisors → Allow WebRequest for listed URLs");
-      Print("Add URL: ", ServerUrl);
+      Print("Add URL: ", g_serverUrl);
    }
    else
    {
@@ -201,7 +217,7 @@ void SendTrade(string url, string json, int ticket)
 //+------------------------------------------------------------------+
 //| Check if ticket was already sent                                 |
 //+------------------------------------------------------------------+
-bool AlreadySent(int ticket)
+bool AlreadySent(ulong ticket)
 {
    for(int i = 0; i < ArraySize(sentTickets); i++)
    {
@@ -213,7 +229,7 @@ bool AlreadySent(int ticket)
 //+------------------------------------------------------------------+
 //| Mark ticket as sent                                              |
 //+------------------------------------------------------------------+
-void MarkAsSent(int ticket)
+void MarkAsSent(ulong ticket)
 {
    int size = ArraySize(sentTickets);
    ArrayResize(sentTickets, size + 1);
@@ -221,38 +237,73 @@ void MarkAsSent(int ticket)
    SaveSentTickets();
 }
 
+#define PULSED_SENT_FILE "pulsed_sent_v2.bin"
+#define PULSED_SENT_VER 2
+
 //+------------------------------------------------------------------+
-//| Save sent tickets to file so they persist across restarts        |
+//| Save sent tickets (64-bit) — legacy file used 32-bit ints        |
 //+------------------------------------------------------------------+
 void SaveSentTickets()
 {
-   int handle = FileOpen("pulsed_sent.dat", FILE_WRITE|FILE_BIN);
-   if(handle != INVALID_HANDLE)
+   int handle = FileOpen(PULSED_SENT_FILE, FILE_WRITE|FILE_BIN);
+   if(handle == INVALID_HANDLE) return;
+
+   FileWriteInteger(handle, PULSED_SENT_VER);
+   int size = ArraySize(sentTickets);
+   FileWriteInteger(handle, size);
+   for(int i = 0; i < size; i++)
    {
-      int size = ArraySize(sentTickets);
-      FileWriteInteger(handle, size);
-      for(int i = 0; i < size; i++)
-         FileWriteInteger(handle, sentTickets[i]);
-      FileClose(handle);
+      ulong t = sentTickets[i];
+      FileWriteInteger(handle, (int)(t & 0xFFFFFFFF));
+      FileWriteInteger(handle, (int)(t >> 32));
    }
+   FileClose(handle);
 }
 
 //+------------------------------------------------------------------+
-//| Load sent tickets from file                                      |
+//| Load sent tickets; migrate old pulsed_sent.dat if present        |
 //+------------------------------------------------------------------+
 void LoadSentTickets()
 {
-   if(!FileIsExist("pulsed_sent.dat")) return;
-   
-   int handle = FileOpen("pulsed_sent.dat", FILE_READ|FILE_BIN);
-   if(handle != INVALID_HANDLE)
+   if(FileIsExist(PULSED_SENT_FILE))
    {
+      int handle = FileOpen(PULSED_SENT_FILE, FILE_READ|FILE_BIN);
+      if(handle == INVALID_HANDLE) return;
+
+      int ver = FileReadInteger(handle);
       int size = FileReadInteger(handle);
+      if(ver != PULSED_SENT_VER || size < 0 || size > 1000000)
+      {
+         FileClose(handle);
+         return;
+      }
       ArrayResize(sentTickets, size);
       for(int i = 0; i < size; i++)
-         sentTickets[i] = FileReadInteger(handle);
+      {
+         uint lo = (uint)FileReadInteger(handle);
+         uint hi = (uint)FileReadInteger(handle);
+         sentTickets[i] = ((ulong)hi << 32) | lo;
+      }
       FileClose(handle);
+      return;
    }
+
+   if(!FileIsExist("pulsed_sent.dat")) return;
+
+   int handle = FileOpen("pulsed_sent.dat", FILE_READ|FILE_BIN);
+   if(handle == INVALID_HANDLE) return;
+
+   int size = FileReadInteger(handle);
+   if(size < 0 || size > 1000000)
+   {
+      FileClose(handle);
+      return;
+   }
+   ArrayResize(sentTickets, size);
+   for(int i = 0; i < size; i++)
+      sentTickets[i] = (ulong)(uint)FileReadInteger(handle);
+   FileClose(handle);
+   SaveSentTickets();
 }
 
 //+------------------------------------------------------------------+

@@ -65,6 +65,28 @@ function jsonError(message, status) {
   return NextResponse.json({ status: 'error', message }, { status })
 }
 
+/** MT5 deal tickets are ulong; accept integer or decimal string (avoids MQL int overflow). */
+function parseMt5Ticket(raw) {
+  if (raw === undefined || raw === null) return { error: 'ticket is required' }
+  let digits
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    if (!Number.isInteger(raw)) return { error: 'ticket must be an integer' }
+    if (raw < 0) return { error: 'ticket must be non-negative' }
+    digits = String(raw)
+  } else if (typeof raw === 'string') {
+    digits = raw.trim()
+    if (!/^\d+$/.test(digits)) return { error: 'ticket must be a non-negative integer' }
+  } else {
+    return { error: 'ticket must be an integer or numeric string' }
+  }
+  if (digits.length > 18) return { error: 'ticket value is too large' }
+  const ticketNum = Number(digits)
+  if (!Number.isSafeInteger(ticketNum)) {
+    return { error: 'ticket is too large; update PulsedEA to the latest version' }
+  }
+  return { ticketNum }
+}
+
 export async function POST(request) {
   let body
   try {
@@ -143,10 +165,11 @@ export async function POST(request) {
     })
   }
 
-  const ticketNum = Number(ticket)
-  if (!Number.isFinite(ticketNum) || !Number.isInteger(ticketNum)) {
-    return jsonError('ticket must be an integer', 400)
+  const ticketParsed = parseMt5Ticket(ticket)
+  if (ticketParsed.error) {
+    return jsonError(ticketParsed.error, 400)
   }
+  const { ticketNum } = ticketParsed
 
   if (typeof symbol !== 'string' || !symbol.trim()) {
     return jsonError('symbol is required', 400)
