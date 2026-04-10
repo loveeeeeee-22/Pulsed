@@ -39,8 +39,8 @@ function buildSymbolCandidates(rawSymbol) {
   const raw = String(rawSymbol || '').trim().toUpperCase()
   if (!raw) return []
 
-  const base = raw.replace(/[^A-Z]/g, '')
-  const compact = base.slice(0, 4)
+  const base = raw.replace(/[^A-Z0-9]/g, '')
+  const compact = base.slice(0, 6)
   const digits = raw.replace(/[^0-9]/g, '')
 
   // Parse futures contract notation like MGCM6 / MGCM26 / MGCM2026
@@ -74,9 +74,18 @@ function buildSymbolCandidates(rawSymbol) {
     MES: ['SPX', 'US500', 'SPY'],
     NQ: ['NDX', 'NASDAQ', 'QQQ'],
     MNQ: ['NDX', 'NASDAQ', 'QQQ'],
-    YM: ['DJI', 'US30'],
-    MYM: ['DJI', 'US30'],
-    M2K: ['RUT', 'US2000'],
+    YM: ['DJI', 'US30', 'DIA'],
+    MYM: ['DJI', 'US30', 'DIA'],
+    US30: ['DJI', 'YM', 'DIA'],
+    WS30: ['DJI', 'YM', 'DIA'],
+    DOW: ['DJI', 'DIA'],
+    US500: ['SPX', 'ES', 'SPY'],
+    SPX500: ['SPX', 'ES', 'SPY'],
+    NAS100: ['NDX', 'NQ', 'NASDAQ', 'QQQ'],
+    US100: ['NDX', 'NQ', 'NASDAQ', 'QQQ'],
+    GER40: ['DAX', 'DE40', 'EWG'],
+    UK100: ['FTSE', 'UKX', 'EWU'],
+    M2K: ['RUT', 'US2000', 'IWM'],
   }
 
   let suffixStripped = []

@@ -81,6 +81,24 @@ export default function TradeReplayPage({ params }) {
           close: c.close
         }))
 
+        // Auto-scale fallback ETFs to CFD scale
+        if (formatted.length > 0 && tData.entry_price) {
+          const entryPrice = Number(tData.entry_price)
+          const firstClose = formatted[0].close
+          if (entryPrice > 0 && firstClose > 0) {
+            const ratio = entryPrice / firstClose
+            if (ratio > 1.5 || ratio < 0.6) {
+              const scale = Math.round(ratio) // usually ~10 or ~100
+              formatted.forEach(c => {
+                c.open *= scale
+                c.high *= scale
+                c.low *= scale
+                c.close *= scale
+              })
+            }
+          }
+        }
+
         // Deduplicate timestamps (lightweight-charts throws if there are duplicates)
         const seen = new Set()
         formatted = formatted.filter(item => {

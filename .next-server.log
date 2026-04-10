@@ -1,0 +1,104 @@
+
+> trading-journal@0.1.0 dev
+> next dev --webpack
+
+▲ Next.js 16.2.1 (webpack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.0.189:3000
+- Environments: .env.local
+✓ Ready in 286ms
+⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+
+ GET /replay/1 200 in 1840ms (next.js: 1537ms, proxy.ts: 63ms, application-code: 239ms)
+ GET /trade-log 200 in 1584ms (next.js: 1394ms, proxy.ts: 19ms, application-code: 171ms)
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/trade-log" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.js">
+                      <SegmentTrieNode>
+                      <link>
+                      <RootLayout>
+                        <html lang="en">
+                          <body
+-                           className="antigravity-scroll-lock"
+                          >
+                  ...
+ 
+ GET /trade-log 200 in 134ms (next.js: 13ms, proxy.ts: 39ms, application-code: 82ms)
+ GET /api/trades 404 in 696ms (next.js: 601ms, application-code: 95ms)
+ GET /trade-log 200 in 167ms (next.js: 28ms, proxy.ts: 8ms, application-code: 130ms)
+ GET / 200 in 1089ms (next.js: 693ms, proxy.ts: 16ms, application-code: 380ms)
+ GET /api/market-data?symbol=US30&date=2024-04-10 502 in 1831ms (next.js: 928ms, application-code: 903ms)
+ GET /trade-log 200 in 566ms (next.js: 145ms, proxy.ts: 8ms, application-code: 413ms)
+ GET /api/trade 404 in 73ms (next.js: 23ms, application-code: 50ms)
+ GET /trade-log 200 in 61ms (next.js: 3ms, proxy.ts: 8ms, application-code: 51ms)
+ GET /trade-log 200 in 96ms (next.js: 12ms, proxy.ts: 14ms, application-code: 70ms)
+ GET /journal 200 in 2.0s (next.js: 1872ms, proxy.ts: 27ms, application-code: 114ms)
+ GET /journal 200 in 541ms (next.js: 8ms, proxy.ts: 59ms, application-code: 474ms)
+ GET /replay/1 200 in 2.4s (next.js: 1168ms, proxy.ts: 19ms, application-code: 1177ms)
+ GET /trade-log 200 in 307ms (next.js: 41ms, proxy.ts: 20ms, application-code: 247ms)
+ GET / 200 in 175ms (next.js: 26ms, proxy.ts: 9ms, application-code: 140ms)
+ GET /analytics 200 in 2.0s (next.js: 1433ms, proxy.ts: 51ms, application-code: 526ms)
+ GET /journal 200 in 143ms (next.js: 27ms, proxy.ts: 15ms, application-code: 101ms)
+ GET /new-trade 200 in 1815ms (next.js: 1372ms, proxy.ts: 17ms, application-code: 426ms)
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/new-trade" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.js">
+                      <SegmentTrieNode>
+                      <link>
+                      <RootLayout>
+                        <html lang="en">
+                          <body
+-                           className="antigravity-scroll-lock"
+                          >
+                  ...
+ 
+ GET /playbook 200 in 2.1s (next.js: 1679ms, proxy.ts: 7ms, application-code: 390ms)
+ GET /replay/d3b07384-d99c-4632-8857-414816867332 200 in 315ms (next.js: 53ms, proxy.ts: 20ms, application-code: 242ms)
+ GET /api/market-data?symbol=US30&date=2024-04-10 502 in 1936ms (next.js: 835ms, application-code: 1101ms)
+ GET /replay/d3b07384-d99c-4632-8857-414816867332 200 in 234ms (next.js: 179ms, proxy.ts: 11ms, application-code: 45ms)
+ GET /api/market-data?symbol=US30&date=2024-04-10 502 in 1426ms (next.js: 23ms, application-code: 1403ms)
+ GET /api/market-data?symbol=DIA&date=2024-04-10 200 in 1778ms (next.js: 11ms, application-code: 1766ms)
+ GET /replay/d3b07384-d99c-4632-8857-414816867332 200 in 248ms (next.js: 126ms, proxy.ts: 7ms, application-code: 115ms)
+ GET /replay/d3b07384-d99c-4632-8857-414816867332 200 in 110ms (next.js: 82ms, proxy.ts: 3ms, application-code: 25ms)
