@@ -56,6 +56,22 @@ const SYMBOLS_BY_ACCOUNT_TYPE = {
 
 const LAST_ACCOUNT_KEY = "lastTradeAccountId";
 
+const EMOTION_PRESETS = [
+  "FOMO",
+  "Sad",
+  "Happy",
+  "Excited",
+  "Angry",
+  "Revenge trading",
+  "Over trading",
+  "Greed",
+  "Fear",
+  "Boredom",
+  "Impatience",
+  "Confident",
+  "Hesitation"
+];
+
 function normalizeRules(rules) {
   if (!rules) return { entry: [], exit: [], market: [], risk: [] }
   if (typeof rules === 'object' && !Array.isArray(rules)) {
@@ -772,16 +788,41 @@ export default function NewTradePage() {
                 />
               </div>
               <div>
-                <label style={labelStyle} htmlFor="notes">
-                  Notes
+                <label style={labelStyle}>
+                  Emotions / Reasons
                 </label>
-                <textarea
-                  id="notes"
-                  rows={3}
-                  style={{ ...inputStyle, resize: "vertical", minHeight: "88px" }}
-                  value={form.notes}
-                  onChange={(e) => updateField("notes", e.target.value)}
-                />
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  {EMOTION_PRESETS.map((emotion) => {
+                    const currentEmotions = form.notes ? form.notes.split(", ") : [];
+                    const isSelected = currentEmotions.includes(emotion);
+                    return (
+                      <button
+                        key={emotion}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            updateField("notes", currentEmotions.filter((e) => e !== emotion).join(", "));
+                          } else {
+                            updateField("notes", [...currentEmotions, emotion].join(", "));
+                          }
+                        }}
+                        style={{
+                          background: isSelected ? "var(--accent, #7C3AED)" : "var(--bg3)",
+                          color: isSelected ? "#fff" : "var(--text2)",
+                          border: isSelected ? "1px solid var(--accent, #7C3AED)" : "1px solid var(--border)",
+                          borderRadius: "16px",
+                          padding: "6px 12px",
+                          fontSize: "12px",
+                          fontFamily: "monospace",
+                          cursor: "pointer",
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        {emotion}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               <div>
                 <label style={labelStyle}>Rules you followed</label>
