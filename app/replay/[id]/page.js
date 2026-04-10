@@ -197,7 +197,18 @@ export default function TradeReplayPage() {
     
     chart.timeScale().fitContent()
 
+    // First paint can still be 0×0 before flex/absolute layout settles; resize once layout is known.
+    const layoutFrame = requestAnimationFrame(() => {
+      const el = chartContainerRef.current
+      if (!el) return
+      const w = el.clientWidth
+      const h = el.clientHeight
+      if (w > 0 && h > 0) chart.resize(w, h, true)
+      chart.timeScale().fitContent()
+    })
+
     return () => {
+      cancelAnimationFrame(layoutFrame)
       chart.remove()
       chartRef.current = null
       candlestickSeriesRef.current = null
@@ -279,7 +290,7 @@ export default function TradeReplayPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#09090b', color: 'var(--text)', fontFamily: 'Inter, sans-serif' }}>
+    <div style={{ height: '100vh', minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#09090b', color: 'var(--text)', fontFamily: 'Inter, sans-serif', overflow: 'hidden' }}>
       
       {/* Top Bar */}
       <header style={{ padding: '16px 24px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -313,9 +324,12 @@ export default function TradeReplayPage() {
         </div>
       </header>
 
-      {/* Main Chart Area */}
-      <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        <div ref={chartContainerRef} style={{ width: '100%', height: '100%' }} />
+      {/* Main Chart Area — flex + height:100% often yields 0px; absolute inset fills the flex slot */}
+      <main style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+        <div
+          ref={chartContainerRef}
+          style={{ position: 'absolute', inset: 0, width: '100%', minHeight: 0 }}
+        />
       </main>
 
       {/* Bottom Controls Bar */}
