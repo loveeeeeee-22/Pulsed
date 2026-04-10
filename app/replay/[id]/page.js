@@ -3,12 +3,13 @@
 import { useEffect, useState, useRef, use } from 'react'
 import { createChart } from 'lightweight-charts'
 import { supabase } from '@/lib/supabase'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 
-export default function TradeReplayPage({ params }) {
-  // Extract id from params Promise
-  const unwrappedParams = use(params)
-  const tradeId = unwrappedParams.id
+export default function TradeReplayPage() {
+  const params = useParams()
+  const tradeId = params?.id
+
 
   const [trade, setTrade] = useState(null)
   const [candles, setCandles] = useState([])
@@ -262,18 +263,18 @@ export default function TradeReplayPage({ params }) {
           </Link>
           <div style={{ height: '24px', width: '1px', background: 'rgba(255,255,255,0.1)' }}></div>
           <div style={{ fontWeight: 600, fontSize: '16px' }}>
-            {trade.symbol} <span style={{ color: 'var(--text3)', fontWeight: 400, marginLeft: '8px' }}>{trade.date}</span>
+            {trade?.symbol} <span style={{ color: 'var(--text3)', fontWeight: 400, marginLeft: '8px' }}>{trade?.date}</span>
           </div>
           <span style={{ 
             fontSize: '11px', 
-            background: trade.direction?.toLowerCase() === 'long' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', 
-            color: trade.direction?.toLowerCase() === 'long' ? '#22C55E' : '#EF4444', 
+            background: trade?.direction?.toLowerCase() === 'long' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', 
+            color: trade?.direction?.toLowerCase() === 'long' ? '#22C55E' : '#EF4444', 
             padding: '4px 10px', 
             borderRadius: '999px', 
             fontWeight: 700, 
             textTransform: 'uppercase'
           }}>
-            {trade.direction}
+            {trade?.direction}
           </span>
         </div>
 
