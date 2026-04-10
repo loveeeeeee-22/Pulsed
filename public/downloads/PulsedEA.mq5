@@ -52,19 +52,42 @@ string TrimUrl(string u)
 int OnInit()
 {
    g_serverUrl = TrimUrl(ServerUrl);
+
+   // Validate required inputs
+   if(StringLen(ApiKey) == 0 || StringLen(AccountId) == 0)
+   {
+      Print("PulsedEA loaded. Configure API Key, Account ID, and Server URL in Inputs.");
+      Print("Right-click the EA on the chart → Properties → Inputs tab.");
+      return(INIT_FAILED);
+   }
+
    Print("PulsedEA initialized. Server: ", g_serverUrl);
-   
+   Print("Endpoint: ", g_serverUrl, "/api/mt5/sync");
+   Print("Account ID: ", AccountId);
+
    // Load previously sent tickets from file
    LoadSentTickets();
-   
-   // Allow WebRequests to our server
-   // User must also enable this in MT5 Tools > Options > Expert Advisors
-   
+
+   // Check for any trades already closed while EA was off
+   CheckForNewClosedTrades();
+
    return(INIT_SUCCEEDED);
 }
 
 //+------------------------------------------------------------------+
-//| Expert tick function - runs on every price tick                  |
+//| OnTradeTransaction — fires immediately when broker processes deal |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest    &request,
+                        const MqlTradeResult     &result)
+{
+   // TRADE_TRANSACTION_DEAL_ADD fires as soon as a deal is recorded
+   if(trans.type == TRADE_TRANSACTION_DEAL_ADD)
+      CheckForNewClosedTrades();
+}
+
+//+------------------------------------------------------------------+
+//| Expert tick function — secondary trigger for active charts       |
 //+------------------------------------------------------------------+
 void OnTick()
 {
