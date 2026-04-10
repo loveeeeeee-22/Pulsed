@@ -3,11 +3,12 @@
 import { useEffect, useState, useRef, use } from 'react'
 import { createChart } from 'lightweight-charts'
 import { supabase } from '@/lib/supabase'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 
-export default function TradeReplayPage({ params }) {
-  const resolvedParams = use(params)
-  const tradeId = resolvedParams?.id
+export default function TradeReplayPage() {
+  const params = useParams()
+  const tradeId = params?.id
 
   const [trade, setTrade] = useState(null)
   const [candles, setCandles] = useState([])
