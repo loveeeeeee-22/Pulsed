@@ -3,13 +3,11 @@
 import { useEffect, useState, useRef, use } from 'react'
 import { createChart } from 'lightweight-charts'
 import { supabase } from '@/lib/supabase'
-import { useParams } from 'next/navigation'
 import Link from 'next/link'
 
-export default function TradeReplayPage() {
-  const params = useParams()
-  const tradeId = params?.id
-
+export default function TradeReplayPage({ params }) {
+  const resolvedParams = use(params)
+  const tradeId = resolvedParams?.id
 
   const [trade, setTrade] = useState(null)
   const [candles, setCandles] = useState([])
@@ -75,7 +73,7 @@ export default function TradeReplayPage() {
         }
 
         // Format for lightweight-charts
-        const formatted = data.candles.map(c => ({
+        let formatted = data.candles.map(c => ({
           time: new Date(c.time).getTime() / 1000,
           open: c.open,
           high: c.high,
@@ -83,12 +81,21 @@ export default function TradeReplayPage() {
           close: c.close
         }))
 
+        // Deduplicate timestamps (lightweight-charts throws if there are duplicates)
+        const seen = new Set()
+        formatted = formatted.filter(item => {
+          if (seen.has(item.time)) return false
+          seen.add(item.time)
+          return true
+        })
+
         // Sort ascending
         formatted.sort((a, b) => a.time - b.time)
         setCandles(formatted)
         
         // Find rough starting point index (a bit before the entry time)
-        const entryTarget = new Date(`${tData.date}T${tData.entry_time}:00Z`).getTime() / 1000
+        // Remove 'Z' to parse in same local timezone context as the candles
+        const entryTarget = new Date(`${tData.date}T${tData.entry_time || '09:30'}:00`).getTime() / 1000
         let sIdx = 0
         for (let i = 0; i < formatted.length; i++) {
           if (formatted[i].time >= entryTarget) {
@@ -198,8 +205,8 @@ export default function TradeReplayPage() {
             
             // Re-calculate running P&L if within trade bounds
             if (trade && trade.entry_price && trade.direction) {
-              const eTime = new Date(`${trade.date}T${trade.entry_time}:00Z`).getTime() / 1000
-              const xTime = trade.exit_time ? new Date(`${trade.date}T${trade.exit_time}:00Z`).getTime() / 1000 : Infinity
+              const eTime = new Date(`${trade.date}T${trade.entry_time || '09:30'}:00`).getTime() / 1000
+              const xTime = trade.exit_time ? new Date(`${trade.date}T${trade.exit_time}:00`).getTime() / 1000 : Infinity
               
               if (nextCandle.time >= eTime && nextCandle.time <= xTime) {
                 const diff = (nextCandle.close - trade.entry_price) / trade.entry_price

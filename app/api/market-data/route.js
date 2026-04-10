@@ -83,7 +83,7 @@ function buildSymbolCandidates(rawSymbol) {
   if (base.length >= 6) {
     const pair = base.slice(0, 6)
     if (['XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'USDCAD'].includes(pair)) {
-      suffixStripped = [`${pair.slice(0,3)}/${pair.slice(3,6)}`, pair]
+      suffixStripped = [`${pair.slice(0, 3)}/${pair.slice(3, 6)}`, pair]
     }
   }
 
