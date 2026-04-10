@@ -156,6 +156,9 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true)
   const [accent, setAccent] = useState('#7C3AED')
   const [hoveredIndex, setHoveredIndex] = useState(null)
+  const [rMultipleHover, setRMultipleHover] = useState(null)
+  const [drawdownHover, setDrawdownHover] = useState(null)
+  const [maeMfeHover, setMaeMfeHover] = useState(null)
 
   useEffect(() => {
     const lsAccent = typeof window !== 'undefined' ? window.localStorage.getItem('accentColor') : null
@@ -1053,19 +1056,50 @@ export default function AnalyticsPage() {
                 <div style={{ color: 'var(--text3)', fontSize: '12px', textAlign: 'center' }}>No trades with R-multiple data yet.<br/>Set a trade risk ($) when logging trades.</div>
               </div>
             ) : (
-              <>
-                <svg width="100%" viewBox="0 0 540 200" style={{ display: 'block', overflow: 'visible' }}>
+              <div onMouseLeave={() => setRMultipleHover(null)}>
+                <svg width="100%" viewBox="0 0 540 210" style={{ display: 'block', overflow: 'visible', cursor: 'crosshair' }}>
                   {rMultipleData.bins.map((bin, i) => {
                     const barH = (bin.count / rMultipleData.maxCount) * 150
                     const x = 30 + i * 56
                     const y = 170 - barH
+                    const isHovered = rMultipleHover === i
                     return (
-                      <g key={bin.label}>
-                        <rect x={x} y={y} width={40} height={Math.max(barH, 1)} fill={bin.color} rx="4" opacity="0.85" />
-                        {bin.count > 0 && (
-                          <text x={x + 20} y={y - 5} textAnchor="middle" fontSize="10" fill="var(--text2)">{bin.count}</text>
+                      <g key={bin.label}
+                        onMouseEnter={() => setRMultipleHover(i)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <rect x={x} y={y} width={40} height={Math.max(barH, 1)} fill={bin.color} rx="4"
+                          opacity={rMultipleHover === null || isHovered ? 0.9 : 0.35}
+                          style={{ transition: 'opacity 0.15s' }}
+                        />
+                        {isHovered && (
+                          <rect x={x - 2} y={y - 2} width={44} height={Math.max(barH, 1) + 4} fill="none"
+                            stroke={bin.color} strokeWidth="1.5" rx="5" opacity="0.8" />
                         )}
-                        <text x={x + 20} y={190} textAnchor="middle" fontSize="10" fill="var(--text3)">{bin.label}</text>
+                        <text x={x + 20} y={y - 7} textAnchor="middle" fontSize="11"
+                          fill={isHovered ? 'var(--text)' : 'var(--text2)'}
+                          fontWeight={isHovered ? '700' : '400'}>
+                          {bin.count > 0 ? bin.count : ''}
+                        </text>
+                        <text x={x + 20} y={190} textAnchor="middle" fontSize="10"
+                          fill={isHovered ? 'var(--text)' : 'var(--text3)'}
+                          fontWeight={isHovered ? '700' : '400'}>
+                          {bin.label}
+                        </text>
+                        {/* Hover tooltip */}
+                        {isHovered && bin.count > 0 && (() => {
+                          const tipX = x > 300 ? x - 110 : x + 46
+                          return (
+                            <g pointerEvents="none">
+                              <rect x={tipX} y={Math.max(y - 2, 4)} width={100} height={44} rx="7"
+                                fill="var(--card-bg)" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
+                              <text x={tipX + 8} y={Math.max(y - 2, 4) + 16} fontSize="11" fill={bin.color} fontFamily="monospace" fontWeight="700">{bin.label}</text>
+                              <text x={tipX + 8} y={Math.max(y - 2, 4) + 32} fontSize="10" fill="var(--text3)" fontFamily="monospace">
+                                {bin.count} trade{bin.count !== 1 ? 's' : ''}
+                              </text>
+                            </g>
+                          )
+                        })()}
                       </g>
                     )
                   })}
@@ -1075,7 +1109,7 @@ export default function AnalyticsPage() {
                   <span>Trades w/ R data: <strong style={{ color: 'var(--text)' }}>{rMultipleData.total}</strong></span>
                   <span>Avg R: <strong style={{ color: 'var(--text)' }}>{rMultipleData.total ? (filteredTrades.reduce((s, t) => s + asNum(t.actual_rr), 0) / rMultipleData.total).toFixed(2) : '—'}R</strong></span>
                 </div>
-              </>
+              </div>
             )}
           </div>
 
@@ -1106,9 +1140,11 @@ export default function AnalyticsPage() {
                 ` L${xAt(pts.length - 1).toFixed(1)},${yAt(0).toFixed(1)} L${padL},${yAt(0).toFixed(1)} Z`
               const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yAt(p.drawdown).toFixed(1)}`).join(' ')
               const ticks = [0, -25, -50, -75, -100].filter(v => v >= minDD - 5)
+              const worstIdx = pts.reduce((mi, p, i) => p.drawdown < pts[mi].drawdown ? i : mi, 0)
+              const slotW = pts.length > 1 ? plotW / (pts.length - 1) : plotW
               return (
-                <>
-                  <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', overflow: 'visible' }}>
+                <div onMouseLeave={() => setDrawdownHover(null)}>
+                  <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', overflow: 'visible', cursor: 'crosshair' }}>
                     <defs>
                       <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.35" />
@@ -1123,26 +1159,37 @@ export default function AnalyticsPage() {
                     ))}
                     <path d={areaPath} fill="url(#ddGrad)" />
                     <path d={linePath} fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinejoin="round" />
-                    {/* Mark max drawdown */}
-                    {(() => {
-                      const worstIdx = pts.reduce((mi, p, i) => p.drawdown < pts[mi].drawdown ? i : mi, 0)
+                    {/* Max drawdown marker */}
+                    <circle cx={xAt(worstIdx)} cy={yAt(pts[worstIdx].drawdown)} r="4" fill="#EF4444" stroke="var(--card-bg)" strokeWidth="1.5" />
+                    {/* Hover crosshair + tooltip */}
+                    {drawdownHover != null && pts[drawdownHover] && (() => {
+                      const idx = drawdownHover
+                      const pt = pts[idx]
+                      const cx = xAt(idx)
+                      const cy = yAt(pt.drawdown)
+                      const tipX = cx > w * 0.6 ? cx - 148 : cx + 10
                       return (
-                        <circle
-                          cx={xAt(worstIdx)}
-                          cy={yAt(pts[worstIdx].drawdown)}
-                          r="4"
-                          fill="#EF4444"
-                          stroke="var(--card-bg)"
-                          strokeWidth="1.5"
-                        />
+                        <g pointerEvents="none">
+                          <line x1={cx} y1={padT} x2={cx} y2={padT + plotH} stroke="rgba(255,255,255,0.2)" strokeWidth="1" strokeDasharray="3 3" />
+                          <circle cx={cx} cy={cy} r="5" fill="#3B82F6" stroke="var(--card-bg)" strokeWidth="2" />
+                          <rect x={tipX} y={padT} width={140} height={60} rx="7" fill="var(--card-bg)" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
+                          <text x={tipX + 8} y={padT + 16} fontSize="9" fill="var(--text3)" fontFamily="monospace">{pt.date}</text>
+                          <text x={tipX + 8} y={padT + 31} fontSize="11" fill="#3B82F6" fontFamily="monospace" fontWeight="700">DD: {pt.drawdown.toFixed(1)}%</text>
+                          <text x={tipX + 8} y={padT + 47} fontSize="10" fill={pt.cumPnl >= 0 ? '#22C55E' : '#EF4444'} fontFamily="monospace">Cum: {pt.cumPnl >= 0 ? '+' : ''}${pt.cumPnl.toFixed(2)}</text>
+                        </g>
                       )
                     })()}
+                    {/* Hit-area rects */}
+                    {pts.map((pt, i) => (
+                      <rect key={i} x={xAt(i) - slotW / 2} y={padT} width={slotW} height={plotH}
+                        fill="transparent" onMouseEnter={() => setDrawdownHover(i)} />
+                    ))}
                   </svg>
                   <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: 'var(--text3)', marginTop: '4px', fontFamily: 'monospace' }}>
                     <span>Max Drawdown: <strong style={{ color: '#EF4444' }}>{drawdownData.maxDrawdown.toFixed(1)}%</strong></span>
                     <span>Current: <strong style={{ color: drawdownData.currentDrawdown < -5 ? '#F87171' : 'var(--text)' }}>{drawdownData.currentDrawdown.toFixed(1)}%</strong></span>
                   </div>
-                </>
+                </div>
               )
             })()}
           </div>
@@ -1179,23 +1226,51 @@ export default function AnalyticsPage() {
             const plotH = h - padB - padT
             const xAt = (v) => padL + (v / maxMae) * plotW
             const yAt = (v) => padT + (1 - v / maxMfe) * plotH
+            const hPt = maeMfeHover != null ? maeMfeData[maeMfeHover] : null
             return (
-              <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: 'block' }}>
-                <line x1={padL} y1={padT} x2={padL} y2={padT + plotH} stroke="var(--border)" strokeWidth="1" />
-                <line x1={padL} y1={padT + plotH} x2={padL + plotW} y2={padT + plotH} stroke="var(--border)" strokeWidth="1" />
-                <text x={padL + plotW / 2} y={h - 4} textAnchor="middle" fontSize="10" fill="var(--text3)">Maximum Adverse Excursion ($)</text>
-                <text x={12} y={padT + plotH / 2} textAnchor="middle" fontSize="10" fill="var(--text3)" transform={`rotate(-90, 12, ${padT + plotH / 2})`}>Max Favorable Excursion ($)</text>
-                {maeMfeData.map((pt, i) => (
-                  <circle
-                    key={i}
-                    cx={xAt(pt.mae)}
-                    cy={yAt(pt.mfe)}
-                    r="5"
-                    fill={pt.status === 'Win' ? PROFIT_COLOR : LOSS_COLOR}
-                    opacity="0.72"
-                  />
-                ))}
-              </svg>
+              <div onMouseLeave={() => setMaeMfeHover(null)}>
+                <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', cursor: 'crosshair' }}>
+                  <line x1={padL} y1={padT} x2={padL} y2={padT + plotH} stroke="var(--border)" strokeWidth="1" />
+                  <line x1={padL} y1={padT + plotH} x2={padL + plotW} y2={padT + plotH} stroke="var(--border)" strokeWidth="1" />
+                  <text x={padL + plotW / 2} y={h - 4} textAnchor="middle" fontSize="10" fill="var(--text3)">Maximum Adverse Excursion ($)</text>
+                  <text x={12} y={padT + plotH / 2} textAnchor="middle" fontSize="10" fill="var(--text3)" transform={`rotate(-90, 12, ${padT + plotH / 2})`}>Max Favorable Excursion ($)</text>
+                  {maeMfeData.map((pt, i) => {
+                    const isH = maeMfeHover === i
+                    return (
+                      <circle
+                        key={i}
+                        cx={xAt(pt.mae)}
+                        cy={yAt(pt.mfe)}
+                        r={isH ? 8 : 5}
+                        fill={pt.status === 'Win' ? PROFIT_COLOR : LOSS_COLOR}
+                        opacity={maeMfeHover === null || isH ? 0.85 : 0.25}
+                        stroke={isH ? 'var(--card-bg)' : 'none'}
+                        strokeWidth={isH ? 2 : 0}
+                        style={{ cursor: 'pointer', transition: 'r 0.1s, opacity 0.15s' }}
+                        onMouseEnter={() => setMaeMfeHover(i)}
+                      />
+                    )
+                  })}
+                  {/* Tooltip for hovered scatter point */}
+                  {hPt && (() => {
+                    const cx = xAt(hPt.mae)
+                    const cy = yAt(hPt.mfe)
+                    const tipX = cx > w * 0.6 ? cx - 160 : cx + 14
+                    const tipY = cy > h * 0.6 ? cy - 90 : cy + 10
+                    return (
+                      <g pointerEvents="none">
+                        <line x1={cx} y1={padT} x2={cx} y2={padT + plotH} stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="4 3" />
+                        <line x1={padL} y1={cy} x2={padL + plotW} y2={cy} stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="4 3" />
+                        <rect x={tipX} y={tipY} width={152} height={76} rx="8" fill="var(--card-bg)" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
+                        <text x={tipX + 10} y={tipY + 17} fontSize="11" fill={hPt.status === 'Win' ? PROFIT_COLOR : LOSS_COLOR} fontFamily="monospace" fontWeight="700">{hPt.status} · {hPt.symbol || '—'}</text>
+                        <text x={tipX + 10} y={tipY + 34} fontSize="10" fill="var(--text3)" fontFamily="monospace">MAE: ${hPt.mae.toFixed(2)}</text>
+                        <text x={tipX + 10} y={tipY + 50} fontSize="10" fill="var(--text3)" fontFamily="monospace">MFE: ${hPt.mfe.toFixed(2)}</text>
+                        <text x={tipX + 10} y={tipY + 66} fontSize="10" fill={hPt.pnl >= 0 ? PROFIT_COLOR : LOSS_COLOR} fontFamily="monospace">P&amp;L: {hPt.pnl >= 0 ? '+' : ''}${hPt.pnl.toFixed(2)}</text>
+                      </g>
+                    )
+                  })()}
+                </svg>
+              </div>
             )
           })()}
         </div>
