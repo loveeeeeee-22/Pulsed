@@ -291,22 +291,43 @@ export default function TradeLog() {
                     </td>
                     <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text2)', padding: '11px 14px' }}>{t.actual_rr ? t.actual_rr + 'R' : '—'}</td>
                     <td style={{ padding: '11px 14px', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        onClick={() => setEditTrade(t)}
-                        style={{
-                          fontSize: '11px',
-                          fontFamily: 'monospace',
-                          padding: '5px 10px',
-                          borderRadius: '6px',
-                          border: '1px solid var(--border-md)',
-                          background: 'var(--bg3)',
-                          color: 'var(--text2)',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Edit
-                      </button>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                        <a
+                          href={`/replay/${t.id}`}
+                          onClick={e => e.stopPropagation()}
+                          style={{
+                            fontSize: '11px',
+                            fontFamily: 'monospace',
+                            padding: '5px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid var(--border-md)',
+                            background: 'var(--bg3)',
+                            color: 'var(--text2)',
+                            textDecoration: 'none',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center'
+                          }}
+                        >
+                          Replay
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => setEditTrade(t)}
+                          style={{
+                            fontSize: '11px',
+                            fontFamily: 'monospace',
+                            padding: '5px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid var(--border-md)',
+                            background: 'var(--bg3)',
+                            color: 'var(--text2)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Edit
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )

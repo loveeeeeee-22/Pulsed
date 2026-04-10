@@ -53,8 +53,8 @@ function buildSymbolCandidates(rawSymbol) {
     const yearRaw = m[3]
     const year =
       yearRaw.length === 4 ? yearRaw :
-      yearRaw.length === 2 ? `20${yearRaw}` :
-      `202${yearRaw}` // single-digit year shorthand used in many retail platforms
+        yearRaw.length === 2 ? `20${yearRaw}` :
+          `202${yearRaw}` // single-digit year shorthand used in many retail platforms
     futuresCandidates = [
       `${root}${month}${yearRaw}`,
       `${root}${month}${year}`,
@@ -150,6 +150,42 @@ export async function GET(request) {
 
       return Response.json({
         provider: 'twelvedata',
+        error: `No supported market symbol found for "${symbol}" (${candidates.join(', ')}). ${lastError}`.trim(),
+      }, { status: 502 })
+    }
+
+    if ((provider === 'tiingo' || !provider) && process.env.TIINGO_API_KEY) {
+      const candidates = buildSymbolCandidates(symbol)
+      let lastError = ''
+
+      for (const candidate of candidates) {
+        const c = candidate.toLowerCase()
+        const url = new URL(`https://api.tiingo.com/tiingo/fx/${c}/prices`)
+        url.searchParams.set('resampleFreq', timeframe)
+        url.searchParams.set('startDate', fromDate.toISOString())
+        url.searchParams.set('endDate', toDate.toISOString())
+        url.searchParams.set('token', process.env.TIINGO_API_KEY)
+        const res = await fetch(url.toString(), { cache: 'no-store' })
+
+        if (!res.ok) {
+          try {
+            const errData = await res.json()
+            lastError = errData?.detail || 'Tiingo request failed.'
+          } catch (e) {
+            lastError = 'Tiingo request failed.'
+          }
+          continue
+        }
+
+        const data = await res.json()
+        if (Array.isArray(data) && data.length > 0) {
+          const candles = normalizeTiingo(data)
+          return Response.json({ provider: 'tiingo', source_symbol: candidate, candles })
+        }
+      }
+
+      return Response.json({
+        provider: 'tiingo',
         error: `No supported market symbol found for "${symbol}" (${candidates.join(', ')}). ${lastError}`.trim(),
       }, { status: 502 })
     }

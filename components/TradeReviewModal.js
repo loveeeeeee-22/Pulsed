@@ -724,6 +724,18 @@ export default function TradeReviewModal({
                 ) : null}
               </div>
             )}
+            <a
+              href={`/replay/${trade?.id}`}
+              style={{
+                ...purpleBtn,
+                background: 'var(--bg3)',
+                color: 'var(--text2)',
+                border: '1px solid var(--border)',
+                textDecoration: 'none',
+              }}
+            >
+              Play Replay
+            </a>
             <button
               type="button"
               onClick={handleClose}
