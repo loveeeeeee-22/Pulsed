@@ -436,6 +436,59 @@ export default function AnalyticsPage() {
     return rows.map(r => ({ ...r, pct: (Math.abs(r.net) / maxAbs) * 100 }))
   }, [filteredTrades])
 
+  // PRO: R-Multiple distribution
+  const rMultipleData = useMemo(() => {
+    const bins = [
+      { label: '<-3R', min: -Infinity, max: -3, color: '#EF4444' },
+      { label: '-3R',  min: -3, max: -2, color: '#EF4444' },
+      { label: '-2R',  min: -2, max: -1, color: '#F87171' },
+      { label: '-1R',  min: -1, max: -0.001, color: '#FCA5A5' },
+      { label: '0R',   min: -0.001, max: 0.5, color: 'var(--text3)' },
+      { label: '+1R',  min: 0.5, max: 1.5, color: '#86EFAC' },
+      { label: '+2R',  min: 1.5, max: 2.5, color: '#4ADE80' },
+      { label: '+3R',  min: 2.5, max: 3.5, color: '#22C55E' },
+      { label: '>+3R', min: 3.5, max: Infinity, color: '#16A34A' },
+    ]
+    const counts = bins.map(b => ({
+      ...b,
+      count: filteredTrades.filter(t => {
+        const r = asNum(t.actual_rr)
+        return r > b.min && r <= b.max
+      }).length
+    }))
+    const maxCount = Math.max(...counts.map(c => c.count), 1)
+    return { bins: counts, maxCount, total: filteredTrades.filter(t => t.actual_rr != null).length }
+  }, [filteredTrades])
+
+  // PRO: Underwater Equity Curve (drawdown)
+  const drawdownData = useMemo(() => {
+    const sorted = [...filteredTrades].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
+    if (!sorted.length) return { points: [], maxDrawdown: 0, currentDrawdown: 0 }
+    let running = 0
+    let peak = 0
+    const points = sorted.map(t => {
+      running += asNum(t.net_pnl)
+      if (running > peak) peak = running
+      const dd = peak > 0 ? ((running - peak) / peak) * 100 : 0
+      return { date: String(t.date || '').slice(0, 10), cumPnl: running, peak, drawdown: dd }
+    })
+    const maxDrawdown = Math.min(...points.map(p => p.drawdown), 0)
+    const currentDrawdown = points[points.length - 1]?.drawdown ?? 0
+    return { points, maxDrawdown, currentDrawdown }
+  }, [filteredTrades])
+
+  // PRO: MAE/MFE scatter
+  const maeMfeData = useMemo(() => {
+    const pts = filteredTrades.filter(t => t.mae != null && t.mfe != null).map(t => ({
+      mae: asNum(t.mae),
+      mfe: asNum(t.mfe),
+      status: t.status,
+      symbol: t.symbol,
+      pnl: asNum(t.net_pnl),
+    }))
+    return pts
+  }, [filteredTrades])
+
   function exportCsv() {
     const rows = filteredTrades
     const headers = [
@@ -911,6 +964,189 @@ export default function AnalyticsPage() {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+
+      {/* ── PRO ANALYTICS ── */}
+      <div style={{ marginTop: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+          <span style={{ fontSize: '11px', fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text3)' }}>Pro Analytics</span>
+          <span style={{
+            background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+            color: '#fff',
+            fontSize: '10px',
+            fontWeight: 700,
+            padding: '2px 8px',
+            borderRadius: '999px',
+            letterSpacing: '0.06em',
+            fontFamily: 'monospace',
+          }}>PRO</span>
+          <span style={{ fontSize: '12px', color: 'var(--text3)' }}>Advanced charts for optimizing your edge</span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+
+          {/* R-Multiple Histogram */}
+          <div style={{ ...panelStyle, borderTop: '2px solid #f59e0b' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+              <div style={panelTitleStyle}>R-Multiple Distribution</div>
+              <span style={{ fontSize: '10px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#fff', padding: '2px 7px', borderRadius: '999px', fontFamily: 'monospace', fontWeight: 700 }}>PRO</span>
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '14px' }}>
+              Frequency of trade outcomes in risk units (R). Shows your edge independent of position size.
+            </div>
+            {rMultipleData.total === 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '180px', gap: '8px' }}>
+                <div style={{ fontSize: '28px' }}>📊</div>
+                <div style={{ color: 'var(--text3)', fontSize: '12px', textAlign: 'center' }}>No trades with R-multiple data yet.<br/>Set a trade risk ($) when logging trades.</div>
+              </div>
+            ) : (
+              <>
+                <svg width="100%" viewBox="0 0 540 200" style={{ display: 'block', overflow: 'visible' }}>
+                  {rMultipleData.bins.map((bin, i) => {
+                    const barH = (bin.count / rMultipleData.maxCount) * 150
+                    const x = 30 + i * 56
+                    const y = 170 - barH
+                    return (
+                      <g key={bin.label}>
+                        <rect x={x} y={y} width={40} height={Math.max(barH, 1)} fill={bin.color} rx="4" opacity="0.85" />
+                        {bin.count > 0 && (
+                          <text x={x + 20} y={y - 5} textAnchor="middle" fontSize="10" fill="var(--text2)">{bin.count}</text>
+                        )}
+                        <text x={x + 20} y={190} textAnchor="middle" fontSize="10" fill="var(--text3)">{bin.label}</text>
+                      </g>
+                    )
+                  })}
+                  <line x1={28} y1={170} x2={526} y2={170} stroke="var(--border)" strokeWidth="1" />
+                </svg>
+                <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: 'var(--text3)', marginTop: '4px', fontFamily: 'monospace' }}>
+                  <span>Trades w/ R data: <strong style={{ color: 'var(--text)' }}>{rMultipleData.total}</strong></span>
+                  <span>Avg R: <strong style={{ color: 'var(--text)' }}>{rMultipleData.total ? (filteredTrades.reduce((s, t) => s + asNum(t.actual_rr), 0) / rMultipleData.total).toFixed(2) : '—'}R</strong></span>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Underwater Equity Curve */}
+          <div style={{ ...panelStyle, borderTop: '2px solid #3B82F6' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+              <div style={panelTitleStyle}>Drawdown (Underwater Curve)</div>
+              <span style={{ fontSize: '10px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#fff', padding: '2px 7px', borderRadius: '999px', fontFamily: 'monospace', fontWeight: 700 }}>PRO</span>
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '14px' }}>
+              How far below your peak equity you are at any point. Critical for prop firm traders.
+            </div>
+            {drawdownData.points.length === 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '180px', gap: '8px' }}>
+                <div style={{ fontSize: '28px' }}>📉</div>
+                <div style={{ color: 'var(--text3)', fontSize: '12px', textAlign: 'center' }}>No trade data yet for this period.</div>
+              </div>
+            ) : (() => {
+              const pts = drawdownData.points
+              const minDD = Math.min(...pts.map(p => p.drawdown), 0)
+              const ddRange = Math.abs(minDD) || 1
+              const w = 500, h = 160, padL = 46, padB = 20, padT = 10
+              const plotW = w - padL
+              const plotH = h - padB - padT
+              const xAt = (i) => padL + (i / Math.max(pts.length - 1, 1)) * plotW
+              const yAt = (v) => padT + (1 - (v - minDD) / ddRange) * plotH
+              const areaPath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yAt(p.drawdown).toFixed(1)}`).join(' ') +
+                ` L${xAt(pts.length - 1).toFixed(1)},${yAt(0).toFixed(1)} L${padL},${yAt(0).toFixed(1)} Z`
+              const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yAt(p.drawdown).toFixed(1)}`).join(' ')
+              const ticks = [0, -25, -50, -75, -100].filter(v => v >= minDD - 5)
+              return (
+                <>
+                  <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', overflow: 'visible' }}>
+                    <defs>
+                      <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.35" />
+                        <stop offset="100%" stopColor="#3B82F6" stopOpacity="0.03" />
+                      </linearGradient>
+                    </defs>
+                    {ticks.map(v => (
+                      <g key={v}>
+                        <line x1={padL} y1={yAt(v)} x2={w} y2={yAt(v)} stroke="var(--border)" strokeWidth="1" />
+                        <text x={padL - 4} y={yAt(v) + 4} textAnchor="end" fontSize="9" fill="var(--text3)">{v.toFixed(0)}%</text>
+                      </g>
+                    ))}
+                    <path d={areaPath} fill="url(#ddGrad)" />
+                    <path d={linePath} fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinejoin="round" />
+                    {/* Mark max drawdown */}
+                    {(() => {
+                      const worstIdx = pts.reduce((mi, p, i) => p.drawdown < pts[mi].drawdown ? i : mi, 0)
+                      return (
+                        <circle
+                          cx={xAt(worstIdx)}
+                          cy={yAt(pts[worstIdx].drawdown)}
+                          r="4"
+                          fill="#EF4444"
+                          stroke="var(--card-bg)"
+                          strokeWidth="1.5"
+                        />
+                      )
+                    })()}
+                  </svg>
+                  <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: 'var(--text3)', marginTop: '4px', fontFamily: 'monospace' }}>
+                    <span>Max Drawdown: <strong style={{ color: '#EF4444' }}>{drawdownData.maxDrawdown.toFixed(1)}%</strong></span>
+                    <span>Current: <strong style={{ color: drawdownData.currentDrawdown < -5 ? '#F87171' : 'var(--text)' }}>{drawdownData.currentDrawdown.toFixed(1)}%</strong></span>
+                  </div>
+                </>
+              )
+            })()}
+          </div>
+        </div>
+
+        {/* MAE / MFE Scatter Plot — full width */}
+        <div style={{ ...panelStyle, borderTop: '2px solid #8B5CF6' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+            <div style={panelTitleStyle}>MAE / MFE Scatter — "The Holy Grail"</div>
+            <span style={{ fontSize: '10px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#fff', padding: '2px 7px', borderRadius: '999px', fontFamily: 'monospace', fontWeight: 700 }}>PRO</span>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '14px' }}>
+            X-axis: Maximum Adverse Excursion (how far it went against you) · Y-axis: Maximum Favorable Excursion (peak profit available). Dots hugging the top axis = exiting winners too early. Dots far right = holding losers too long.
+          </div>
+          {maeMfeData.length === 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '24px', padding: '28px 20px', background: 'rgba(139,92,246,0.05)', borderRadius: '10px', border: '1px dashed rgba(139,92,246,0.25)' }}>
+              <div style={{ fontSize: '40px', flexShrink: 0 }}>📡</div>
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: '4px', color: 'var(--text)' }}>MAE / MFE data not yet available</div>
+                <div style={{ fontSize: '12px', color: 'var(--text3)', lineHeight: 1.55 }}>
+                  This chart requires Maximum Adverse Excursion and Maximum Favorable Excursion data per trade.<br />
+                  These values are captured by broker integrations (MT5/Tradovate) or can be manually logged in the future.<br />
+                  <span style={{ color: '#8B5CF6', fontWeight: 600 }}>Once connected, this becomes the single most powerful chart for optimizing stops and targets.</span>
+                </div>
+              </div>
+            </div>
+          ) : (() => {
+            const allMae = maeMfeData.map(p => p.mae)
+            const allMfe = maeMfeData.map(p => p.mfe)
+            const maxMae = Math.max(...allMae, 1)
+            const maxMfe = Math.max(...allMfe, 1)
+            const w = 900, h = 300, padL = 60, padB = 40, padT = 14, padR = 20
+            const plotW = w - padL - padR
+            const plotH = h - padB - padT
+            const xAt = (v) => padL + (v / maxMae) * plotW
+            const yAt = (v) => padT + (1 - v / maxMfe) * plotH
+            return (
+              <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: 'block' }}>
+                <line x1={padL} y1={padT} x2={padL} y2={padT + plotH} stroke="var(--border)" strokeWidth="1" />
+                <line x1={padL} y1={padT + plotH} x2={padL + plotW} y2={padT + plotH} stroke="var(--border)" strokeWidth="1" />
+                <text x={padL + plotW / 2} y={h - 4} textAnchor="middle" fontSize="10" fill="var(--text3)">Maximum Adverse Excursion ($)</text>
+                <text x={12} y={padT + plotH / 2} textAnchor="middle" fontSize="10" fill="var(--text3)" transform={`rotate(-90, 12, ${padT + plotH / 2})`}>Max Favorable Excursion ($)</text>
+                {maeMfeData.map((pt, i) => (
+                  <circle
+                    key={i}
+                    cx={xAt(pt.mae)}
+                    cy={yAt(pt.mfe)}
+                    r="5"
+                    fill={pt.status === 'Win' ? PROFIT_COLOR : LOSS_COLOR}
+                    opacity="0.72"
+                  />
+                ))}
+              </svg>
+            )
+          })()}
         </div>
       </div>
 
