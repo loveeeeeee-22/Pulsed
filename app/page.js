@@ -346,6 +346,28 @@ export default function Dashboard() {
     return list
   }, [trades, selectedAccount, journalFilter, strategyFilter, timeRange])
 
+  const latestLoggedTradeKey = useMemo(() => {
+    if (!trades.length) return 'none'
+    let latestStamp = ''
+    let latestId = ''
+    for (const t of trades) {
+      const stamp = String(t.created_at || t.date || '')
+      if (stamp >= latestStamp) {
+        latestStamp = stamp
+        latestId = String(t.id || '')
+      }
+    }
+    return `${latestStamp}:${latestId}`
+  }, [trades])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const stored = window.localStorage.getItem('dashboardReviewedBannerDismissedFor')
+    if (stored) setDismissedReviewedBannerForKey(stored)
+  }, [])
+
+  const hideReviewedBanner = dismissedReviewedBannerForKey === latestLoggedTradeKey
+
   if (!authLoading && !sessionUser) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--page-bg)', color: 'var(--text)', fontFamily: 'sans-serif', padding: '24px 16px' }}>
@@ -423,27 +445,6 @@ export default function Dashboard() {
   const todayWins = todayTrades.filter(t => t.status === 'Win')
   const dayWinRate = todayTrades.length ? ((todayWins.length / todayTrades.length) * 100).toFixed(0) : '0'
   const pendingReviewCount = countTradesNeedingReview(filtered)
-  const latestLoggedTradeKey = useMemo(() => {
-    if (!trades.length) return 'none'
-    let latestStamp = ''
-    let latestId = ''
-    for (const t of trades) {
-      const stamp = String(t.created_at || t.date || '')
-      if (stamp >= latestStamp) {
-        latestStamp = stamp
-        latestId = String(t.id || '')
-      }
-    }
-    return `${latestStamp}:${latestId}`
-  }, [trades])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const stored = window.localStorage.getItem('dashboardReviewedBannerDismissedFor')
-    if (stored) setDismissedReviewedBannerForKey(stored)
-  }, [])
-
-  const hideReviewedBanner = dismissedReviewedBannerForKey === latestLoggedTradeKey
 
   const longTrades = filtered.filter(t => directionIsLong(t.direction))
   const shortTrades = filtered.filter(t => directionIsShort(t.direction))
