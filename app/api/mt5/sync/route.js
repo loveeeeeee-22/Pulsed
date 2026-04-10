@@ -249,7 +249,6 @@ export async function POST(request) {
     points: null,
     gross_pnl: grossPnl,
     fees,
-    net_pnl: netPnl,
     entry_price: openPx,
     exit_price: closePx,
     entry_time: parsedOpen.entryTime,

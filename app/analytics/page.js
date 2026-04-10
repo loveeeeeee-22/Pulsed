@@ -155,6 +155,7 @@ export default function AnalyticsPage() {
   const [chartType, setChartType] = useState('line')
   const [loading, setLoading] = useState(true)
   const [accent, setAccent] = useState('#7C3AED')
+  const [hoveredIndex, setHoveredIndex] = useState(null)
 
   useEffect(() => {
     const lsAccent = typeof window !== 'undefined' ? window.localStorage.getItem('accentColor') : null
@@ -686,6 +687,7 @@ export default function AnalyticsPage() {
           padding: '14px',
           marginBottom: '16px',
         }}
+        onMouseLeave={() => setHoveredIndex(null)}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '10px' }}>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -858,9 +860,58 @@ export default function AnalyticsPage() {
           {chartRows.map((row, i) => {
             const x = xAt(i, chartRows.length)
             return (
-              <text key={`x-${row.key}`} x={x} y={chartH - 16} textAnchor="middle" fontSize="10" fill="var(--text3)">
+              <text key={`x-${row.key}`} x={x} y={chartH - 16} textAnchor="middle" fontSize="10" fill={hoveredIndex === i ? 'var(--text)' : 'var(--text3)'}>
                 {row.label}
               </text>
+            )
+          })}
+
+          {/* Hover crosshair + dots */}
+          {hoveredIndex != null && chartRows[hoveredIndex] && (() => {
+            const row = chartRows[hoveredIndex]
+            const x = xAt(hoveredIndex, chartRows.length)
+            const lyv = yLeft(row.leftValue)
+            const ryv = rightMetric ? yRight(row.rightValue) : null
+            const leftLabel = METRICS.find(m => m.id === leftMetric)?.label || leftMetric
+            const rightLabel = rightMetric ? METRICS.find(m => m.id === rightMetric)?.label : null
+            const leftFmt = formatAxisValue(row.leftValue, leftMetric)
+            const rightFmt = rightMetric ? formatAxisValue(row.rightValue, rightMetric) : null
+            // Tooltip box positioning — flip to left side if near right edge
+            const tipX = x > chartW * 0.65 ? x - 180 : x + 14
+            const tipY = pad.top
+            return (
+              <g pointerEvents="none">
+                {/* Vertical rule */}
+                <line x1={x} y1={pad.top} x2={x} y2={pad.top + plotH} stroke="rgba(255,255,255,0.15)" strokeWidth="1" strokeDasharray="4 3" />
+                {/* Left metric dot */}
+                <circle cx={x} cy={lyv} r="5" fill={leftColor} stroke="var(--card-bg)" strokeWidth="2" />
+                {/* Right metric dot */}
+                {ryv != null && <circle cx={x} cy={ryv} r="4" fill={rightColor} stroke="var(--card-bg)" strokeWidth="2" />}
+                {/* Tooltip card */}
+                <rect x={tipX - 2} y={tipY} width="176" height={rightMetric ? 72 : 56} rx="8" fill="var(--card-bg)" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
+                <text x={tipX + 10} y={tipY + 16} fontSize="10" fill="var(--text3)" fontFamily="monospace">{row.label}</text>
+                <text x={tipX + 10} y={tipY + 33} fontSize="12" fill={leftColor} fontFamily="monospace" fontWeight="700">{leftLabel}: {leftFmt}</text>
+                {rightLabel && <text x={tipX + 10} y={tipY + 52} fontSize="12" fill={rightColor} fontFamily="monospace" fontWeight="700">{rightLabel}: {rightFmt}</text>}
+                {/* Trade count sub-label */}
+                <text x={tipX + 10} y={rightMetric ? tipY + 66 : tipY + 50} fontSize="10" fill="var(--text3)" fontFamily="monospace">{row.trades} trade{row.trades !== 1 ? 's' : ''}</text>
+              </g>
+            )
+          })()}
+
+          {/* Invisible hit-area rects for hover detection */}
+          {chartRows.map((row, i) => {
+            const x = xAt(i, chartRows.length)
+            const slotW = chartRows.length > 1 ? plotW / (chartRows.length - 1) : plotW
+            return (
+              <rect
+                key={`hit-${row.key}`}
+                x={x - slotW / 2}
+                y={pad.top}
+                width={slotW}
+                height={plotH}
+                fill="transparent"
+                onMouseEnter={() => setHoveredIndex(i)}
+              />
             )
           })}
         </svg>
