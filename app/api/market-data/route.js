@@ -76,12 +76,19 @@ function buildSymbolCandidates(rawSymbol) {
     MNQ: ['NDX', 'NASDAQ', 'QQQ'],
     YM: ['DJI', 'US30'],
     MYM: ['DJI', 'US30'],
-    RTY: ['RUT', 'US2000'],
     M2K: ['RUT', 'US2000'],
   }
 
+  let suffixStripped = []
+  if (base.length >= 6) {
+    const pair = base.slice(0, 6)
+    if (['XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'USDCAD'].includes(pair)) {
+      suffixStripped = [`${pair.slice(0,3)}/${pair.slice(3,6)}`, pair]
+    }
+  }
+
   const fromAlias = aliases[compact] || []
-  return [...new Set([raw, ...futuresCandidates, base, compact, ...fromAlias].filter(Boolean))]
+  return [...new Set([raw, ...futuresCandidates, base, compact, ...fromAlias, ...suffixStripped].filter(Boolean))]
 }
 
 export async function GET(request) {
