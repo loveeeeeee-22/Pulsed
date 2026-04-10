@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState, useRef, use } from 'react'
-import { createChart } from 'lightweight-charts'
+import { useEffect, useState, useRef } from 'react'
+import { createChart, CandlestickSeries } from 'lightweight-charts'
 import { supabase } from '@/lib/supabase'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
@@ -159,7 +159,7 @@ export default function TradeReplayPage() {
       autoSize: true,
     })
 
-    const series = chart.addCandlestickSeries({
+    const series = chart.addSeries(CandlestickSeries, {
       upColor: '#22C55E',
       downColor: '#EF4444',
       borderVisible: false,

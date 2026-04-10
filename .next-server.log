@@ -189,3 +189,6 @@ https://react.dev/link/hydration-mismatch
  GET /replay/1 200 in 1913ms (next.js: 1535ms, proxy.ts: 17ms, application-code: 361ms)
  GET /replay/d3b07384-d99c-4632-8857-414816867332 200 in 1913ms (next.js: 1535ms, proxy.ts: 17ms, application-code: 362ms)
  GET /api/market-data?symbol=US30&date=2024-04-10 200 in 2.5s (next.js: 756ms, application-code: 1718ms)
+○ Compiling / ...
+ GET / 200 in 20.9s (next.js: 19.2s, proxy.ts: 562ms, application-code: 1128ms)
+ GET / 200 in 1717ms (next.js: 40ms, proxy.ts: 26ms, application-code: 1650ms)
