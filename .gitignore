@@ -40,3 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env.local
+
+# python (chart experiments)
+python/.venv/
+__pycache__/
+*.py[cod]
