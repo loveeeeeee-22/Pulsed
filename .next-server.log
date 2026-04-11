@@ -280,3 +280,21 @@ Incoming: [false, 10, ]
   360 |     if (isPlaying) {
   361 |       const msPerTick = speed === 1 ? 1000 : speed === 5 ? 200 : speed === 10 ? 100 : 20
   362 | (app/replay/[id]/page.js:359:12)
+⨯ ./app/replay/[id]/page.js
+Error:   x Expected ',', got '{'
+     ,-[/Users/love/Documents/01_Projects/Coding_Projects/Cursor/trading-journal/app/replay/[id]/page.js:620:1]
+ 617 |       const d = new Date(ts)
+ 618 |       setOhlcvTooltip({
+ 619 |         date: d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }),
+ 620 |         time: d.toLocaleTimeString(undefined { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+     :                                              ^
+ 621 |         o,
+ 622 |         h,
+ 623 |         l,
+     `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./app/replay/[id]/page.js

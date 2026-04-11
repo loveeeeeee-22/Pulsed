@@ -121,10 +121,18 @@ export async function GET(request) {
     fromDate.setMinutes(fromDate.getMinutes() - 180)
 
     if (provider === 'polygon' && process.env.POLYGON_API_KEY) {
-      const multiplier = timeframe.startsWith('5') ? 5 : timeframe.startsWith('15') ? 15 : 1
+      const tf = timeframe.toLowerCase()
+      let multiplier = 1
+      let timespan = 'minute'
+      if (tf === '5min' || tf === '5m') multiplier = 5
+      else if (tf === '15min' || tf === '15m') multiplier = 15
+      else if (tf === '1h' || tf === '60min' || tf === '60m') {
+        multiplier = 1
+        timespan = 'hour'
+      }
       const from = toISODate(fromDate)
       const to = toISODate(toDate)
-      const url = new URL(`https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}/range/${multiplier}/minute/${from}/${to}`)
+      const url = new URL(`https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}/range/${multiplier}/${timespan}/${from}/${to}`)
       url.searchParams.set('adjusted', 'true')
       url.searchParams.set('sort', 'asc')
       url.searchParams.set('limit', String(count))
