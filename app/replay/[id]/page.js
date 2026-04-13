@@ -13,7 +13,7 @@ import {
   CrosshairMode,
 } from 'lightweight-charts'
 import { supabase } from '@/lib/supabase'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { calculateReplayPnl, getInstrumentSpec } from '@/lib/instrumentSpecs'
 
@@ -135,15 +135,54 @@ function formatPnl(n) {
   return `${sign}${v.toFixed(2)}`
 }
 
-function buildTradeMarkers(trade, candles, entryIdx, exitIdx, visibleLastTime, highlightEntry) {
+function closestCandleByTime(candles, targetSec) {
+  if (!candles?.length) return null
+  return candles.reduce((prev, curr) =>
+    Math.abs(curr.time - targetSec) < Math.abs(prev.time - targetSec) ? curr : prev
+  )
+}
+
+function volBarColor(c) {
+  return c.close >= c.open ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'
+}
+
+function tradeDurationMinutes(trade) {
+  if (!trade?.date) return null
+  const entryIso = `${trade.date}T${padTimePart(trade.entry_time || '09:30')}`
+  const exitIso = `${trade.date}T${padTimePart(trade.exit_time || trade.entry_time || '09:30')}`
+  const a = new Date(entryIso).getTime()
+  const b = new Date(exitIso).getTime()
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null
+  return Math.max(0, Math.round((b - a) / 60000))
+}
+
+function buildTradeMarkers(trade, candles, entryIdx, exitIdx, visibleLastTime) {
   const isLong = String(trade?.direction || '').toLowerCase() === 'long'
   const entryPx = Number(trade?.entry_price)
   const exitPx = Number(trade?.exit_price)
   const netPnl = trade?.net_pnl
 
   const markers = []
-  const entryTime = candles[entryIdx]?.time
-  const exitTime = candles[exitIdx]?.time
+
+  const entryTarget = trade ? tradeTimeToUnixSec(trade.date, trade.entry_time || '09:30') : null
+  const exitTarget =
+    trade && trade.exit_time ? tradeTimeToUnixSec(trade.date, trade.exit_time) : null
+
+  const entryCandle =
+    entryIdx >= 0 && entryIdx < candles.length
+      ? candles[entryIdx]
+      : entryTarget != null
+        ? closestCandleByTime(candles, entryTarget)
+        : null
+  const exitCandle =
+    exitIdx >= 0 && exitIdx < candles.length
+      ? candles[exitIdx]
+      : exitTarget != null
+        ? closestCandleByTime(candles, exitTarget)
+        : null
+
+  const entryTime = entryCandle?.time
+  const exitTime = exitCandle?.time
 
   const entryVisible =
     entryIdx >= 0 &&
@@ -160,19 +199,7 @@ function buildTradeMarkers(trade, candles, entryIdx, exitIdx, visibleLastTime, h
     exitTime != null &&
     visibleLastTime != null &&
     exitTime <= visibleLastTime &&
-    exitIdx !== entryIdx &&
     ((Number.isFinite(exitPx) && exitPx > 0) || Number.isFinite(candles[exitIdx]?.close))
-
-  if (entryVisible && highlightEntry) {
-    markers.push({
-      time: entryTime,
-      position: 'inBar',
-      shape: 'circle',
-      color: isLong ? 'rgba(34, 197, 94, 0.35)' : 'rgba(239, 68, 68, 0.35)',
-      size: 2,
-      id: 'entry-highlight',
-    })
-  }
 
   if (entryVisible) {
     markers.push({
@@ -180,14 +207,15 @@ function buildTradeMarkers(trade, candles, entryIdx, exitIdx, visibleLastTime, h
       position: isLong ? 'belowBar' : 'aboveBar',
       shape: isLong ? 'arrowUp' : 'arrowDown',
       color: isLong ? '#22C55E' : '#EF4444',
-      text: `Entry ${entryPx}`,
+      text: `Entry $${entryPx}`,
+      size: 2,
     })
   }
 
   if (exitVisible) {
     const xText =
       Number.isFinite(exitPx) && exitPx > 0
-        ? `Exit ${exitPx} | P&L: ${formatPnl(netPnl)}`
+        ? `Exit $${exitPx} | P&L: ${formatPnl(netPnl)}`
         : `Exit | P&L: ${formatPnl(netPnl)}`
     markers.push({
       time: exitTime,
@@ -195,6 +223,7 @@ function buildTradeMarkers(trade, candles, entryIdx, exitIdx, visibleLastTime, h
       shape: isLong ? 'arrowDown' : 'arrowUp',
       color: isLong ? '#EF4444' : '#22C55E',
       text: xText,
+      size: 2,
     })
   }
 
@@ -233,6 +262,7 @@ const CHART_MODES = [
 
 export default function TradeReplayPage() {
   const params = useParams()
+  const router = useRouter()
   const tradeId = params?.id
 
   const [trade, setTrade] = useState(null)
@@ -258,8 +288,9 @@ export default function TradeReplayPage() {
   const [indicatorsOpen, setIndicatorsOpen] = useState(false)
 
   const [ohlcvTooltip, setOhlcvTooltip] = useState(null)
+  const [tradeCompleteOpen, setTradeCompleteOpen] = useState(false)
 
-  const chartOuterRef = useRef()
+  const chartAreaRef = useRef()
   const chartContainerRef = useRef()
   const chartRef = useRef()
   const mainSeriesRef = useRef()
@@ -270,27 +301,52 @@ export default function TradeReplayPage() {
   const ema9Ref = useRef()
   const playbackRef = useRef(null)
   const chartBuildIndexRef = useRef(0)
+  const replayStartIndexRef = useRef(0)
   const displayModeRef = useRef('candle')
   const crosshairHandlerRef = useRef(null)
+  const tradeRef = useRef(null)
+  const candlesRef = useRef([])
+  const entryBarIdxRef = useRef(0)
+  const exitBarIdxRef = useRef(0)
 
   displayModeRef.current = displayMode
+  tradeRef.current = trade
+  candlesRef.current = candles
+  entryBarIdxRef.current = entryBarIdx
+  exitBarIdxRef.current = exitBarIdx
 
   const replayPnlAtIndex = useCallback((t, candleRows, idx, entryIdx, exitIdx) => {
-    if (!t || !candleRows.length || idx < 0 || entryIdx < 0) return 0
-    if (idx < entryIdx) return 0
+    if (!t || !candleRows.length || idx < 0) return 0
+    const row = candleRows[idx]
+    if (!row) return 0
 
-    if (exitIdx >= 0 && idx >= exitIdx) {
-      const realized = Number(t.net_pnl)
-      if (Number.isFinite(realized)) return realized
-    }
+    const entryT = tradeTimeToUnixSec(t.date, t.entry_time || '09:30')
+    const exitT = t.exit_time ? tradeTimeToUnixSec(t.date, t.exit_time) : null
+    const curT = row.time
+
+    if (curT < entryT) return 0
 
     const spec = getInstrumentSpec({ symbol: t.symbol })
     const exitPx = Number(t.exit_price)
     const hasExit = Number.isFinite(exitPx) && exitPx > 0
-    let markPrice = candleRows[idx]?.close
-    if (exitIdx >= 0 && idx >= exitIdx) {
-      markPrice = hasExit ? exitPx : candleRows[exitIdx]?.close
+
+    if (exitT != null && curT >= exitT) {
+      const realized = Number(t.net_pnl)
+      if (Number.isFinite(realized)) return realized
+      const xIdx =
+        exitIdx >= 0 && exitIdx < candleRows.length ? exitIdx : closestBarIndexByTime(candleRows, exitT)
+      const markPrice = hasExit ? exitPx : candleRows[xIdx]?.close
+      if (!Number.isFinite(markPrice)) return 0
+      return calculateReplayPnl({
+        entryPrice: t.entry_price,
+        currentPrice: markPrice,
+        contracts: t.contracts,
+        direction: t.direction,
+        spec,
+      })
     }
+
+    const markPrice = row.close
     if (!Number.isFinite(markPrice)) return 0
     return calculateReplayPnl({
       entryPrice: t.entry_price,
@@ -307,11 +363,21 @@ export default function TradeReplayPage() {
         setLoading(true)
         setError('')
 
-        const { data: tData, error: tErr } = await supabase
+        let tData
+        let tErr
+        const withStrategy = await supabase
           .from('trades')
-          .select('*')
+          .select('*, strategies ( name )')
           .eq('id', tradeId)
           .single()
+        if (withStrategy.error) {
+          const fallback = await supabase.from('trades').select('*').eq('id', tradeId).single()
+          tData = fallback.data
+          tErr = fallback.error
+        } else {
+          tData = withStrategy.data
+          tErr = withStrategy.error
+        }
 
         if (tErr || !tData) throw new Error(tErr?.message || 'Trade not found')
 
@@ -375,6 +441,7 @@ export default function TradeReplayPage() {
         let sIdx = Math.max(0, eIdx - 15)
         if (sIdx === 0 && formatted.length > 50) sIdx = 10
         chartBuildIndexRef.current = sIdx
+        replayStartIndexRef.current = sIdx
         setCurrentIndex(sIdx)
       } catch (err) {
         setError(err.message)
@@ -390,6 +457,20 @@ export default function TradeReplayPage() {
     if (loading || !trade || candles.length === 0) return
     setRunningPnl(replayPnlAtIndex(trade, candles, currentIndex, entryBarIdx, exitBarIdx))
   }, [loading, trade, candles, currentIndex, entryBarIdx, exitBarIdx, replayPnlAtIndex])
+
+  useEffect(() => {
+    if (!trade || !candles.length) {
+      setTradeCompleteOpen(false)
+      return
+    }
+    const exitT = trade.exit_time ? tradeTimeToUnixSec(trade.date, trade.exit_time) : null
+    const curT = candles[currentIndex]?.time
+    if (exitT == null || curT == null) {
+      setTradeCompleteOpen(false)
+      return
+    }
+    setTradeCompleteOpen(curT >= exitT)
+  }, [trade, candles, currentIndex])
 
   useEffect(() => {
     if (!chartRef.current) return
@@ -414,9 +495,13 @@ export default function TradeReplayPage() {
   useEffect(() => {
     if (loading || error || candles.length === 0 || !chartContainerRef.current || !trade) return
 
-    const chart = createChart(chartContainerRef.current, {
+    const el = chartContainerRef.current
+    const w0 = el.clientWidth
+    const h0 = el.clientHeight
+
+    const chart = createChart(el, {
       layout: {
-        background: { type: 'solid', color: 'transparent' },
+        background: { type: 'solid', color: '#141414' },
         textColor: '#9CA3AF',
       },
       grid: {
@@ -434,7 +519,9 @@ export default function TradeReplayPage() {
       rightPriceScale: {
         borderColor: 'rgba(255, 255, 255, 0.1)',
       },
-      autoSize: true,
+      autoSize: false,
+      width: w0 > 0 ? w0 : 400,
+      height: h0 > 0 ? h0 : 320,
     })
 
     let mainSeries
@@ -482,12 +569,16 @@ export default function TradeReplayPage() {
       volSeries = chart.addSeries(
         HistogramSeries,
         {
-          color: 'rgba(59, 130, 246, 0.45)',
+          color: '#26a69a',
           priceFormat: { type: 'volume' },
-          priceScaleId: '',
+          priceScaleId: 'volume',
+          scaleMargins: { top: 0.8, bottom: 0 },
         },
         1
       )
+      chart.priceScale('volume').applyOptions({
+        scaleMargins: { top: 0.8, bottom: 0 },
+      })
     }
 
     const sliceEnd = Math.max(chartBuildIndexRef.current + 1, 1)
@@ -499,7 +590,7 @@ export default function TradeReplayPage() {
         rawVis.map(c => ({
           time: c.time,
           value: c.volume,
-          color: c.close >= c.open ? 'rgba(34, 197, 94, 0.35)' : 'rgba(239, 68, 68, 0.35)',
+          color: volBarColor(c),
         }))
       )
     }
@@ -555,6 +646,12 @@ export default function TradeReplayPage() {
     const markersApi = createSeriesMarkers(mainSeries, [], { autoScale: true })
     markersPluginRef.current = markersApi
 
+    const visIdx0 = chartBuildIndexRef.current
+    const visibleLast0 = candles[visIdx0]?.time
+    markersApi.setMarkers(
+      buildTradeMarkers(trade, candles, entryBarIdx, exitBarIdx, visibleLast0)
+    )
+
     const full = fullOhlcForMode(candles, displayMode)
     const maxIdx = chartBuildIndexRef.current
 
@@ -604,8 +701,13 @@ export default function TradeReplayPage() {
       const ts = typeof param.time === 'number' ? param.time * 1000 : Date.now()
       const d = new Date(ts)
       setOhlcvTooltip({
-        date: d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }),
-        time: d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        date: d.toLocaleDateString('en-US', {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        }),
+        time: d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
         o,
         h,
         l,
@@ -621,17 +723,39 @@ export default function TradeReplayPage() {
 
     chart.timeScale().fitContent()
 
+    const resizeChart = () => {
+      const box = chartContainerRef.current
+      if (!box || !chartRef.current) return
+      const w = box.clientWidth
+      const h = box.clientHeight
+      if (w > 0 && h > 0) chartRef.current.resize(w, h, true)
+      chartRef.current.timeScale().fitContent()
+    }
+
     const layoutFrame = requestAnimationFrame(() => {
-      const el = chartContainerRef.current
-      if (!el) return
-      const w = el.clientWidth
-      const h = el.clientHeight
-      if (w > 0 && h > 0) chart.resize(w, h, true)
-      chart.timeScale().fitContent()
+      resizeChart()
     })
+
+    const chartAreaEl = chartAreaRef.current
+    const ro =
+      typeof ResizeObserver !== 'undefined' && chartAreaEl
+        ? new ResizeObserver(() => resizeChart())
+        : null
+    if (ro && chartAreaEl) ro.observe(chartAreaEl)
+
+    window.addEventListener('resize', resizeChart)
 
     return () => {
       cancelAnimationFrame(layoutFrame)
+      window.removeEventListener('resize', resizeChart)
+      if (ro && chartAreaEl) {
+        try {
+          ro.unobserve(chartAreaEl)
+        } catch (_) {
+          /* ignore */
+        }
+      }
+      ro?.disconnect()
       if (crosshairHandlerRef.current) {
         try {
           chart.unsubscribeCrosshairMove(crosshairHandlerRef.current)
@@ -676,8 +800,7 @@ export default function TradeReplayPage() {
     const api = markersPluginRef.current
     if (!api || !trade || !candles.length) return
     const visibleLast = candles[currentIndex]?.time
-    const highlightEntry = currentIndex >= entryBarIdx
-    api.setMarkers(buildTradeMarkers(trade, candles, entryBarIdx, exitBarIdx, visibleLast, highlightEntry))
+    api.setMarkers(buildTradeMarkers(trade, candles, entryBarIdx, exitBarIdx, visibleLast))
   }, [trade, candles, currentIndex, entryBarIdx, exitBarIdx])
 
   useEffect(() => {
@@ -703,12 +826,18 @@ export default function TradeReplayPage() {
             volumeSeriesRef.current.update({
               time: nextCandle.time,
               value: nextCandle.volume,
-              color:
-                nextCandle.close >= nextCandle.open
-                  ? 'rgba(34, 197, 94, 0.35)'
-                  : 'rgba(239, 68, 68, 0.35)',
+              color: volBarColor(nextCandle),
             })
           }
+          setRunningPnl(
+            replayPnlAtIndex(
+              tradeRef.current,
+              candlesRef.current,
+              nextIdx,
+              entryBarIdxRef.current,
+              exitBarIdxRef.current
+            )
+          )
           chartRef.current?.timeScale().scrollToRealTime()
           return nextIdx
         })
@@ -718,7 +847,7 @@ export default function TradeReplayPage() {
     }
 
     return () => clearInterval(playbackRef.current)
-  }, [isPlaying, speed, candles])
+  }, [isPlaying, speed, candles, replayPnlAtIndex])
 
   const handleScrub = e => {
     const val = Number(e.target.value)
@@ -734,7 +863,7 @@ export default function TradeReplayPage() {
         rawVis.map(c => ({
           time: c.time,
           value: c.volume,
-          color: c.close >= c.open ? 'rgba(34, 197, 94, 0.35)' : 'rgba(239, 68, 68, 0.35)',
+          color: volBarColor(c),
         }))
       )
     }
@@ -803,6 +932,23 @@ export default function TradeReplayPage() {
       </div>
     )
   }
+
+  const isLongDir = trade?.direction?.toLowerCase() === 'long'
+  const entryTs = trade ? tradeTimeToUnixSec(trade.date, trade.entry_time || '09:30') : null
+  const exitTs = trade?.exit_time ? tradeTimeToUnixSec(trade.date, trade.exit_time) : null
+  const curBarTs = candles[currentIndex]?.time
+  const positionOpen =
+    entryTs != null &&
+    curBarTs != null &&
+    curBarTs >= entryTs &&
+    (exitTs == null || curBarTs < exitTs)
+  const strat = trade?.strategies
+  const strategyName = Array.isArray(strat) ? strat[0]?.name : strat?.name
+  const entrySide = isLongDir ? 'BUY' : 'SELL'
+  const exitSide = isLongDir ? 'SELL' : 'BUY'
+  const durMin = tradeDurationMinutes(trade)
+  const finalPnl = Number(trade?.net_pnl)
+  const finalPnlNum = Number.isFinite(finalPnl) ? finalPnl : runningPnl
 
   const toolbarBtn = (active, onClick, children) => (
     <button
@@ -929,8 +1075,162 @@ export default function TradeReplayPage() {
         </span>
       </div>
 
-      <main style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div ref={chartOuterRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      <main
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'row',
+          overflow: 'hidden',
+        }}
+      >
+        <aside
+          style={{
+            width: 260,
+            flexShrink: 0,
+            background: 'var(--card-bg)',
+            borderRight: '1px solid var(--border)',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 20,
+            padding: '16px 14px',
+            fontSize: 12,
+          }}
+        >
+          <section>
+            <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>{trade?.symbol}</div>
+            <div style={{ color: 'var(--text3)', marginTop: 6 }}>{trade?.date}</div>
+            <div style={{ marginTop: 10 }}>
+              <span
+                style={{
+                  fontSize: 10,
+                  background: isLongDir ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                  color: isLongDir ? '#22C55E' : '#EF4444',
+                  padding: '4px 10px',
+                  borderRadius: '999px',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                }}
+              >
+                {isLongDir ? 'LONG' : 'SHORT'}
+              </span>
+            </div>
+            <div
+              style={{
+                marginTop: 14,
+                fontFamily: 'monospace',
+                fontSize: 22,
+                fontWeight: 700,
+                color: runningPnl >= 0 ? '#22C55E' : '#EF4444',
+              }}
+            >
+              {runningPnl >= 0 ? '+' : '-'}${Math.abs(Number(runningPnl) || 0).toFixed(2)}
+            </div>
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 6, color: 'var(--text2)' }}>
+              <div>
+                <span style={{ color: 'var(--text3)' }}>Entry </span>${Number(trade?.entry_price || 0).toFixed(2)}
+              </div>
+              <div>
+                <span style={{ color: 'var(--text3)' }}>Exit </span>${Number(trade?.exit_price || 0).toFixed(2)}
+              </div>
+              <div>
+                <span style={{ color: 'var(--text3)' }}>Contracts </span>
+                {trade?.contracts ?? '—'}
+              </div>
+              <div>
+                <span style={{ color: 'var(--text3)' }}>Session </span>
+                {trade?.session ?? '—'}
+              </div>
+              {strategyName ? (
+                <div>
+                  <span style={{ color: 'var(--text3)' }}>Strategy </span>
+                  {strategyName}
+                </div>
+              ) : null}
+              {durMin != null ? (
+                <div>
+                  <span style={{ color: 'var(--text3)' }}>Duration </span>
+                  {durMin} min
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+            <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 11, color: 'var(--text3)' }}>Executions</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, lineHeight: 1.4 }}>
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 999,
+                    background: '#22C55E',
+                    marginTop: 4,
+                    flexShrink: 0,
+                  }}
+                />
+                <div>
+                  <span style={{ fontWeight: 600 }}>{entrySide}</span>
+                  <span style={{ color: 'var(--text3)', marginLeft: 6 }}>{trade?.entry_time || '—'}</span>
+                  <div style={{ fontFamily: 'monospace' }}>
+                    ${Number(trade?.entry_price || 0).toFixed(2)} · {trade?.contracts ?? '—'} contracts
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, lineHeight: 1.4 }}>
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 999,
+                    background: '#EF4444',
+                    marginTop: 4,
+                    flexShrink: 0,
+                  }}
+                />
+                <div>
+                  <span style={{ fontWeight: 600 }}>{exitSide}</span>
+                  <span style={{ color: 'var(--text3)', marginLeft: 6 }}>{trade?.exit_time || '—'}</span>
+                  <div style={{ fontFamily: 'monospace' }}>
+                    ${Number(trade?.exit_price || 0).toFixed(2)} · {trade?.contracts ?? '—'} contracts
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {positionOpen ? (
+            <section style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+              <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>Unrealized P&amp;L</div>
+              <div
+                style={{
+                  fontFamily: 'monospace',
+                  fontSize: 20,
+                  fontWeight: 700,
+                  color: runningPnl >= 0 ? '#22C55E' : '#EF4444',
+                }}
+              >
+                {runningPnl >= 0 ? '+' : '-'}${Math.abs(Number(runningPnl) || 0).toFixed(2)}
+              </div>
+              <div style={{ marginTop: 8, color: 'var(--text2)', fontFamily: 'monospace', fontSize: 11 }}>
+                Entry ${Number(trade?.entry_price || 0).toFixed(2)} vs close $
+                {Number(candles[currentIndex]?.close || 0).toFixed(2)}
+              </div>
+            </section>
+          ) : null}
+        </aside>
+
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+          }}
+        >
           <div
             style={{
               height: 36,
@@ -1016,10 +1316,19 @@ export default function TradeReplayPage() {
             </div>
           </div>
 
-          <div style={{ flex: 1, minHeight: 500, position: 'relative', width: '100%' }}>
+          <div
+            ref={chartAreaRef}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              position: 'relative',
+              width: '100%',
+              background: '#141414',
+            }}
+          >
             <div
               ref={chartContainerRef}
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', minHeight: 500 }}
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
             />
             {ohlcvTooltip ? (
               <div
@@ -1027,11 +1336,11 @@ export default function TradeReplayPage() {
                   position: 'absolute',
                   top: 8,
                   left: 8,
-                  zIndex: 20,
-                  background: 'rgba(17,17,19,0.92)',
+                  zIndex: 25,
+                  background: '#1C1C1C',
                   border: '1px solid rgba(255,255,255,0.1)',
                   borderRadius: 8,
-                  padding: '8px 10px',
+                  padding: '8px 12px',
                   fontSize: 11,
                   fontFamily: 'ui-monospace, monospace',
                   color: 'rgba(255,255,255,0.9)',
@@ -1040,30 +1349,135 @@ export default function TradeReplayPage() {
                   lineHeight: 1.45,
                 }}
               >
-                <div style={{ color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
-                  {ohlcvTooltip.date} {ohlcvTooltip.time}
+                <div>Date: {ohlcvTooltip.date}</div>
+                <div style={{ marginBottom: 6 }}>Time: {ohlcvTooltip.time}</div>
+                <div>
+                  O: {Number(ohlcvTooltip.o).toFixed(2)} &nbsp; H: {Number(ohlcvTooltip.h).toFixed(2)}
                 </div>
-                <div>O {Number(ohlcvTooltip.o).toFixed(4)}</div>
-                <div>H {Number(ohlcvTooltip.h).toFixed(4)}</div>
-                <div>L {Number(ohlcvTooltip.l).toFixed(4)}</div>
-                <div>C {Number(ohlcvTooltip.c).toFixed(4)}</div>
-                <div>V {ohlcvTooltip.v != null ? Number(ohlcvTooltip.v).toLocaleString() : '—'}</div>
+                <div>
+                  L: {Number(ohlcvTooltip.l).toFixed(2)} &nbsp; C: {Number(ohlcvTooltip.c).toFixed(2)}
+                </div>
+                <div>Vol: {ohlcvTooltip.v != null ? Number(ohlcvTooltip.v).toLocaleString() : '—'}</div>
+              </div>
+            ) : null}
+
+            {tradeCompleteOpen ? (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 30,
+                  background: 'rgba(0,0,0,0.55)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 16,
+                }}
+              >
+                <div
+                  style={{
+                    width: '100%',
+                    maxWidth: 380,
+                    background: '#1a1a1c',
+                    border: '1px solid var(--border)',
+                    borderRadius: 12,
+                    padding: '24px 22px',
+                    boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
+                  }}
+                >
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Trade Complete</div>
+                  <div
+                    style={{
+                      fontFamily: 'monospace',
+                      fontSize: 28,
+                      fontWeight: 700,
+                      color: finalPnlNum >= 0 ? '#22C55E' : '#EF4444',
+                      marginBottom: 12,
+                    }}
+                  >
+                    {finalPnlNum >= 0 ? '+' : '-'}${Math.abs(finalPnlNum).toFixed(2)}
+                  </div>
+                  <div style={{ marginBottom: 16 }}>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        padding: '4px 10px',
+                        borderRadius: 999,
+                        background:
+                          finalPnlNum >= 0 ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                        color: finalPnlNum >= 0 ? '#22C55E' : '#EF4444',
+                      }}
+                    >
+                      {finalPnlNum >= 0 ? 'Win' : 'Loss'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div>
+                      Entry: ${Number(trade?.entry_price || 0).toFixed(2)} at {trade?.entry_time || '—'}
+                    </div>
+                    <div>
+                      Exit: ${Number(trade?.exit_price || 0).toFixed(2)} at {trade?.exit_time || '—'}
+                    </div>
+                    {durMin != null ? <div>Duration: {durMin} minutes</div> : null}
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsPlaying(false)
+                        setCurrentIndex(replayStartIndexRef.current)
+                        setTradeCompleteOpen(false)
+                      }}
+                      style={{
+                        flex: 1,
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        border: '1px solid var(--border)',
+                        background: 'var(--card-bg)',
+                        color: 'var(--text)',
+                        fontWeight: 600,
+                        fontSize: 12,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Replay Again
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => router.push('/trade-log')}
+                      style={{
+                        flex: 1,
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        border: 'none',
+                        background: '#3B82F6',
+                        color: '#fff',
+                        fontWeight: 600,
+                        fontSize: 12,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Next Trade
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : null}
           </div>
-        </div>
-      </main>
 
-      <footer
-        style={{
-          padding: '20px 24px',
-          borderTop: '1px solid rgba(255,255,255,0.08)',
-          background: '#111113',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '16px',
-        }}
-      >
+          <footer
+            style={{
+              padding: '20px 24px',
+              borderTop: '1px solid rgba(255,255,255,0.08)',
+              background: '#111113',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              flexShrink: 0,
+            }}
+          >
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <span style={{ fontSize: '12px', color: 'var(--text3)', fontFamily: 'monospace', width: '40px' }}>
             {candles[currentIndex]?.time
@@ -1139,6 +1553,8 @@ export default function TradeReplayPage() {
           </div>
         </div>
       </footer>
+        </div>
+      </main>
     </div>
   )
 }

@@ -298,3 +298,82 @@ Caused by:
 
 Import trace for requested module:
 ./app/replay/[id]/page.js
+⨯ ./app/replay/[id]/page.js
+Error:   x Expected a semicolon
+     ,-[/Users/love/Documents/01_Projects/Coding_Projects/Cursor/trading-journal/app/replay/[id]/page.js:368:1]
+ 365 |         setError('')
+ 366 | 
+ 367 |         let tData
+ 368 |         let tErr        const withStrategy = await supabase
+     :                         ^^^^^
+ 369 |           .from('trades')
+ 370 |           .select('*, strategies ( name )')
+ 371 |           .eq('id', tradeId)
+     `----
+  x Expression expected
+     ,-[/Users/love/Documents/01_Projects/Coding_Projects/Cursor/trading-journal/app/replay/[id]/page.js:369:1]
+ 366 | 
+ 367 |         let tData
+ 368 |         let tErr        const withStrategy = await supabase
+ 369 |           .from('trades')
+     :           ^
+ 370 |           .select('*, strategies ( name )')
+ 371 |           .eq('id', tradeId)
+ 372 |           .single()
+     `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./app/replay/[id]/page.js
+⨯ ./app/replay/[id]/page.js
+Error:   x Expected a semicolon
+     ,-[/Users/love/Documents/01_Projects/Coding_Projects/Cursor/trading-journal/app/replay/[id]/page.js:368:1]
+ 365 |         setError('')
+ 366 | 
+ 367 |         let tData
+ 368 |         let tErr        const withStrategy = await supabase
+     :                         ^^^^^
+ 369 |           .from('trades')
+ 370 |           .select('*, strategies ( name )')
+ 371 |           .eq('id', tradeId)
+     `----
+  x Expression expected
+     ,-[/Users/love/Documents/01_Projects/Coding_Projects/Cursor/trading-journal/app/replay/[id]/page.js:369:1]
+ 366 | 
+ 367 |         let tData
+ 368 |         let tErr        const withStrategy = await supabase
+ 369 |           .from('trades')
+     :           ^
+ 370 |           .select('*, strategies ( name )')
+ 371 |           .eq('id', tradeId)
+ 372 |           .single()
+     `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./app/replay/[id]/page.js
+⨯ ./app/replay/[id]/page.js
+Error:   x Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+      ,-[/Users/love/Documents/01_Projects/Coding_Projects/Cursor/trading-journal/app/replay/[id]/page.js:1557:1]
+ 1554 |       </footer>
+ 1555 |     </div>
+ 1556 |   )
+ 1557 | }
+      : ^
+      `----
+  x Expected '</', got '<eof>'
+      ,-[/Users/love/Documents/01_Projects/Coding_Projects/Cursor/trading-journal/app/replay/[id]/page.js:1557:3]
+ 1555 |     </div>
+ 1556 |   )
+ 1557 | }
+      `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./app/replay/[id]/page.js
