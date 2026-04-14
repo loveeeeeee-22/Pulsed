@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { getAccountsForUser } from '@/lib/getAccountsForUser'
@@ -10,7 +10,7 @@ import { countTradesNeedingReview, isTradeReviewed } from '@/lib/tradeReviewStat
 import EditTradeModal from '@/components/EditTradeModal'
 import TradeReviewModal from '@/components/TradeReviewModal'
 
-export default function TradeLog() {
+function TradeLogContent() {
   const searchParams = useSearchParams()
   const [trades, setTrades] = useState([])
   const [accounts, setAccounts] = useState([])
@@ -414,5 +414,13 @@ export default function TradeLog() {
         />
       )}
     </div>
+  )
+}
+
+export default function TradeLog() {
+  return (
+    <Suspense fallback={null}>
+      <TradeLogContent />
+    </Suspense>
   )
 }
