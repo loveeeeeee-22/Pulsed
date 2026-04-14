@@ -72,6 +72,90 @@ const EMOTION_PRESETS = [
   "Hesitation"
 ];
 
+const GRADE_LETTERS = ["A", "B", "C", "D", "F"];
+
+const GRADE_THEME = {
+  A: { background: "rgba(34,197,94,0.15)", border: "2px solid #22C55E", color: "#22C55E" },
+  B: { background: "rgba(74,222,128,0.12)", border: "2px solid #4ADE80", color: "#4ADE80" },
+  C: { background: "rgba(234,179,8,0.12)", border: "2px solid #EAB308", color: "#EAB308" },
+  D: { background: "rgba(249,115,22,0.12)", border: "2px solid #F97316", color: "#F97316" },
+  F: { background: "rgba(239,68,68,0.15)", border: "2px solid #EF4444", color: "#EF4444" },
+};
+
+const GRADE_DESCRIPTIONS = {
+  A: "Excellent execution",
+  B: "Good — minor issues",
+  C: "Average — notable mistakes",
+  D: "Poor — significant errors",
+  F: "Failed to follow the plan",
+};
+
+/** Numeric weights for averaging criteria into overall (auto mode). */
+const OVERALL_AUTO_SCORE = { A: 100, B: 80, C: 65, D: 50, F: 25 };
+
+const initialSelectedGrades = {
+  patience: "",
+  entry: "",
+  sl: "",
+  tp: "",
+  management: "",
+  psychology: "",
+  rules: "",
+};
+
+const CRITERIA_ROWS = [
+  { key: "patience", label: "Patience", criterion: "Patience" },
+  { key: "entry", label: "Entry execution", criterion: "Entry Execution" },
+  { key: "sl", label: "Stop loss placement", criterion: "Stop Loss Placement" },
+  { key: "tp", label: "Profit target", criterion: "Profit Target" },
+  { key: "management", label: "Trade management", criterion: "Trade Management" },
+  { key: "psychology", label: "Psychology / emotion", criterion: "Psychology / Emotion" },
+  { key: "rules", label: "Rule adherence", criterion: "Rule Adherence" },
+];
+
+function averageCriteriaToOverallLetter(selectedGrades) {
+  const values = Object.values(selectedGrades)
+    .map((g) => OVERALL_AUTO_SCORE[String(g || "").toUpperCase()])
+    .filter((n) => typeof n === "number");
+  if (!values.length) return "";
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  if (avg >= 85) return "A";
+  if (avg >= 70) return "B";
+  if (avg >= 55) return "C";
+  if (avg >= 40) return "D";
+  return "F";
+}
+
+function gradeButtonStyles(letter, selected, size) {
+  const isLarge = size === "large";
+  const base = {
+    boxSizing: "border-box",
+    flex: 1,
+    minWidth: 0,
+    borderRadius: "8px",
+    fontWeight: 700,
+    fontFamily: "monospace",
+    cursor: "pointer",
+    transition: "all 0.15s",
+  };
+  if (isLarge) {
+    base.height = "48px";
+    base.fontSize = "18px";
+  } else {
+    base.height = "36px";
+    base.fontSize = "14px";
+  }
+  if (selected) {
+    return { ...base, ...GRADE_THEME[letter] };
+  }
+  return {
+    ...base,
+    background: "var(--bg3)",
+    border: "1px solid var(--border-md)",
+    color: "var(--text3)",
+  };
+}
+
 function normalizeRules(rules) {
   if (!rules) return { entry: [], exit: [], market: [], risk: [] }
   if (typeof rules === 'object' && !Array.isArray(rules)) {
@@ -99,6 +183,38 @@ export default function NewTradePage() {
   const [strategyRules, setStrategyRules] = useState({ entry: [], exit: [], market: [], risk: [] })
   const [rulesFollowed, setRulesFollowed] = useState({})
   const [editTrade, setEditTrade] = useState(null);
+  const [selectedGrades, setSelectedGrades] = useState(() => ({ ...initialSelectedGrades }));
+  const [overallGradeManual, setOverallGradeManual] = useState(false);
+
+  async function loadMetadata() {
+    setMetaLoading(true);
+    const [nextAccounts, nextStrategies] = await Promise.all([
+      getAccountsForUser().then((rows) => rows.map((a) => ({ id: a.id, name: a.name, type: a.type }))),
+      getStrategiesForUser({ select: "id, name, rules", order: { column: "name", ascending: true } }),
+    ]);
+
+    setAccounts(nextAccounts);
+    setStrategies(nextStrategies);
+
+    const rawSettings = localStorage.getItem("journalSettings");
+    const userDefaults = rawSettings ? JSON.parse(rawSettings) : null;
+    const preferredSession = SESSION_OPTIONS.includes(userDefaults?.defaultSession)
+      ? userDefaults.defaultSession
+      : "New York";
+    const preferredContracts =
+      userDefaults?.defaultContracts != null ? String(userDefaults.defaultContracts) : "";
+
+    const savedLastAccountId = localStorage.getItem(LAST_ACCOUNT_KEY) || "";
+    const hasSavedAccount = nextAccounts.some((a) => a.id === savedLastAccountId);
+    const defaultAccountId = hasSavedAccount ? savedLastAccountId : "";
+    setForm((prev) => ({
+      ...prev,
+      account_id: defaultAccountId,
+      session: preferredSession,
+      contracts: preferredContracts,
+    }));
+    setMetaLoading(false);
+  }
 
   useEffect(() => {
     loadMetadata();
@@ -140,36 +256,6 @@ export default function NewTradePage() {
     setRulesFollowed(nextFollowed)
   }, [form.strategy_id, strategies]);
 
-  async function loadMetadata() {
-    setMetaLoading(true);
-    const [nextAccounts, nextStrategies] = await Promise.all([
-      getAccountsForUser().then((rows) => rows.map((a) => ({ id: a.id, name: a.name, type: a.type }))),
-      getStrategiesForUser({ select: "id, name, rules", order: { column: "name", ascending: true } }),
-    ]);
-
-    setAccounts(nextAccounts);
-    setStrategies(nextStrategies);
-
-    const rawSettings = localStorage.getItem("journalSettings");
-    const userDefaults = rawSettings ? JSON.parse(rawSettings) : null;
-    const preferredSession = SESSION_OPTIONS.includes(userDefaults?.defaultSession)
-      ? userDefaults.defaultSession
-      : "New York";
-    const preferredContracts =
-      userDefaults?.defaultContracts != null ? String(userDefaults.defaultContracts) : "";
-
-    const savedLastAccountId = localStorage.getItem(LAST_ACCOUNT_KEY) || "";
-    const hasSavedAccount = nextAccounts.some((a) => a.id === savedLastAccountId);
-    const defaultAccountId = hasSavedAccount ? savedLastAccountId : "";
-    setForm((prev) => ({
-      ...prev,
-      account_id: defaultAccountId,
-      session: preferredSession,
-      contracts: preferredContracts,
-    }));
-    setMetaLoading(false);
-  }
-
   const gross = parseNumber(form.gross_pnl);
   const fees = parseNumber(form.fees);
   const profitTarget = parseNumber(form.profit_target);
@@ -198,6 +284,12 @@ export default function NewTradePage() {
     [netPnl, form.trade_risk]
   );
 
+  const autoOverallFromCriteria = useMemo(
+    () => averageCriteriaToOverallLetter(selectedGrades),
+    [selectedGrades]
+  );
+  const effectiveTradeGrade = overallGradeManual ? form.trade_grade : autoOverallFromCriteria;
+
   const selectedAccountForLabels = accounts.find(a => a.id === form.account_id)
   const accountTypeForLabels = String(selectedAccountForLabels?.type || '').toLowerCase()
   const contractsLabel = accountTypeForLabels === 'forex' ? 'Lots' : 'Contracts'
@@ -211,6 +303,36 @@ export default function NewTradePage() {
     setForm((prev) => ({ ...prev, [name]: value }));
     setSuccess(false);
     setError(null);
+  }
+
+  function setCriterionGrade(key, letter) {
+    setOverallGradeManual(false);
+    setSuccess(false);
+    setError(null);
+    setSelectedGrades((prev) => {
+      const cur = prev[key];
+      const nextVal = cur === letter ? "" : letter;
+      return { ...prev, [key]: nextVal };
+    });
+  }
+
+  function setOverallGradeClick(letter) {
+    setSuccess(false);
+    setError(null);
+    const currentAuto = averageCriteriaToOverallLetter(selectedGrades);
+    const current =
+      overallGradeManual ? form.trade_grade : currentAuto;
+    if (current === letter) {
+      if (overallGradeManual) {
+        setOverallGradeManual(false);
+        updateField("trade_grade", "");
+      } else {
+        setSelectedGrades({ ...initialSelectedGrades });
+      }
+      return;
+    }
+    setOverallGradeManual(true);
+    updateField("trade_grade", letter);
   }
 
   async function handleSubmit(e) {
@@ -258,7 +380,8 @@ export default function NewTradePage() {
       status: form.status.trim() || null,
       notes: form.notes.trim() || null,
       mistakes: computedMistakes,
-      trade_grade: form.trade_grade.trim() || null,
+      trade_grade:
+        (overallGradeManual ? form.trade_grade.trim() : autoOverallFromCriteria) || null,
       reviewed: false,
     };
 
@@ -268,23 +391,55 @@ export default function NewTradePage() {
       .select("*")
       .single();
 
-    setSubmitting(false);
-
     if (insertError) {
+      setSubmitting(false);
       setError(insertError.message);
       return;
     }
 
-    const lastAccountId = form.account_id || "";
+    const newTradeId = insertedTrade.id;
+    const criteriaGrades = {
+      Patience: selectedGrades.patience,
+      "Entry Execution": selectedGrades.entry,
+      "Stop Loss Placement": selectedGrades.sl,
+      "Profit Target": selectedGrades.tp,
+      "Trade Management": selectedGrades.management,
+      "Psychology / Emotion": selectedGrades.psychology,
+      "Rule Adherence": selectedGrades.rules,
+    };
+    const ratingsToInsert = Object.entries(criteriaGrades)
+      .filter(([, grade]) => grade)
+      .map(([criterion, grade]) => ({
+        trade_id: newTradeId,
+        criterion,
+        grade,
+      }));
+
+    let ratingsErrorMessage = null;
+    if (ratingsToInsert.length > 0) {
+      const { error: ratingsError } = await supabase.from("trade_ratings").insert(ratingsToInsert);
+      if (ratingsError) ratingsErrorMessage = ratingsError.message;
+    }
+
+    setSubmitting(false);
     setSuccess(true);
+    setError(
+      ratingsErrorMessage
+        ? `Trade saved, but criterion ratings could not be saved: ${ratingsErrorMessage}`
+        : null
+    );
+
+    const lastAccountId = form.account_id || "";
     setForm((prev) => ({
       ...initialForm,
       account_id: lastAccountId,
       session: prev.session,
       contracts: prev.contracts,
     }));
-    setStrategyRules({ entry: [], exit: [] })
-    setRulesFollowed({})
+    setSelectedGrades({ ...initialSelectedGrades });
+    setOverallGradeManual(false);
+    setStrategyRules({ entry: [], exit: [], market: [], risk: [] });
+    setRulesFollowed({});
     if (insertedTrade) setEditTrade(insertedTrade);
   }
 
@@ -776,17 +931,110 @@ export default function NewTradePage() {
             </h2>
             <div style={{ display: "grid", gap: "12px" }}>
               <div>
-                <label style={labelStyle} htmlFor="trade_grade">
-                  Trade grade
-                </label>
-                <input
-                  id="trade_grade"
-                  style={inputStyle}
-                  value={form.trade_grade}
-                  onChange={(e) => updateField("trade_grade", e.target.value)}
-                  placeholder="A–F or score"
-                />
+                <span style={labelStyle}>Overall Trade Grade</span>
+                <div
+                  role="group"
+                  aria-label="Overall Trade Grade"
+                  style={{ display: "flex", gap: "8px", marginTop: "6px" }}
+                >
+                  {GRADE_LETTERS.map((letter) => {
+                    const selected = effectiveTradeGrade === letter;
+                    return (
+                      <button
+                        key={letter}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setOverallGradeClick(letter)}
+                        style={gradeButtonStyles(letter, selected, "large")}
+                      >
+                        {letter}
+                      </button>
+                    );
+                  })}
+                </div>
+                {effectiveTradeGrade && GRADE_DESCRIPTIONS[effectiveTradeGrade] ? (
+                  <p
+                    style={{
+                      margin: "10px 0 0",
+                      fontSize: "12px",
+                      color: "var(--text2)",
+                      fontFamily: "monospace",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {GRADE_DESCRIPTIONS[effectiveTradeGrade]}
+                  </p>
+                ) : null}
+                <p
+                  style={{
+                    margin: effectiveTradeGrade && GRADE_DESCRIPTIONS[effectiveTradeGrade] ? "8px 0 0" : "10px 0 0",
+                    fontSize: "12px",
+                    color: "var(--text3)",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  How well did you execute this trade overall?
+                </p>
               </div>
+
+              <div>
+                <span style={labelStyle}>Rate trade</span>
+                <div
+                  style={{
+                    marginTop: "6px",
+                    border: "1px solid var(--border-md)",
+                    borderRadius: "12px",
+                    overflow: "hidden",
+                    background: "var(--bg3)",
+                  }}
+                >
+                  {CRITERIA_ROWS.map((row, idx) => (
+                    <div
+                      key={row.key}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0,1fr) minmax(0,2.2fr)",
+                        gap: "10px",
+                        alignItems: "center",
+                        padding: "10px 12px",
+                        borderBottom: idx < CRITERIA_ROWS.length - 1 ? "1px solid var(--border)" : "none",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          fontFamily: "monospace",
+                          color: "var(--text2)",
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        {row.label}
+                      </div>
+                      <div
+                        role="group"
+                        aria-label={`Grade for ${row.criterion}`}
+                        style={{ display: "flex", gap: "6px" }}
+                      >
+                        {GRADE_LETTERS.map((letter) => {
+                          const selected = selectedGrades[row.key] === letter;
+                          return (
+                            <button
+                              key={letter}
+                              type="button"
+                              aria-pressed={selected}
+                              onClick={() => setCriterionGrade(row.key, letter)}
+                              style={gradeButtonStyles(letter, selected, "compact")}
+                            >
+                              {letter}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div>
                 <label style={labelStyle}>
                   Emotions / Reasons

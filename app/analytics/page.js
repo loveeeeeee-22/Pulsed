@@ -90,9 +90,53 @@ function buildHeatmapCalendar(year) {
   return { weeks, monthStarts }
 }
 
+/** Heatmap daily cells: A–F → score (matches trade_ratings analytics). */
+const HEATMAP_GRADE_TO_SCORE = { A: 100, B: 75, C: 50, D: 25, F: 0 }
+
+function heatmapGradeToScore(grade) {
+  const key = String(grade || '').trim().toUpperCase()
+  const v = HEATMAP_GRADE_TO_SCORE[key]
+  return typeof v === 'number' ? v : undefined
+}
+
+function getDayColor(dayData) {
+  if (!dayData) return 'rgba(255,255,255,0.04)'
+  if (dayData.tradeCount > 0 && !dayData.hasRatings) {
+    return 'rgba(255,255,255,0.08)'
+  }
+  if (dayData.score === null || dayData.score === undefined) {
+    return 'rgba(255,255,255,0.04)'
+  }
+  const score = dayData.score
+  if (score <= 20) return 'rgba(239,68,68,0.75)'
+  if (score <= 40) return 'rgba(239,68,68,0.45)'
+  if (score <= 60) return 'rgba(234,179,8,0.55)'
+  if (score <= 80) return 'rgba(34,197,94,0.45)'
+  return 'rgba(34,197,94,0.80)'
+}
+
+function heatmapCellStyle(dayStats, inYear) {
+  if (!inYear) {
+    return {
+      background: 'transparent',
+      border: '1px solid transparent',
+      opacity: 0.28,
+      dot: false,
+    }
+  }
+  const bg = getDayColor(dayStats)
+  const unratedDot = Boolean(dayStats && dayStats.tradeCount > 0 && !dayStats.hasRatings)
+  return {
+    background: bg,
+    border: unratedDot ? '1px solid rgba(255,255,255,0.15)' : '1px solid transparent',
+    opacity: 1,
+    dot: unratedDot,
+  }
+}
+
 function adherenceBucket(dayStats) {
   if (!dayStats || dayStats.tradeCount === 0) return 'no_trades'
-  if (dayStats.ratingCount === 0) return 'unrated'
+  if (!dayStats.hasRatings) return 'unrated'
   const score = asNum(dayStats.score)
   if (score <= 20) return 'very_poor'
   if (score <= 40) return 'poor'
@@ -118,11 +162,11 @@ function adherenceStyle(bucket, inYear = true) {
       dot: true,
     }
   }
-  if (bucket === 'very_poor') return { background: 'rgba(239,68,68,0.7)', border: '1px solid transparent', opacity: 1, dot: false }
+  if (bucket === 'very_poor') return { background: 'rgba(239,68,68,0.75)', border: '1px solid transparent', opacity: 1, dot: false }
   if (bucket === 'poor') return { background: 'rgba(239,68,68,0.45)', border: '1px solid transparent', opacity: 1, dot: false }
   if (bucket === 'moderate') return { background: 'rgba(234,179,8,0.55)', border: '1px solid transparent', opacity: 1, dot: false }
   if (bucket === 'good') return { background: 'rgba(34,197,94,0.45)', border: '1px solid transparent', opacity: 1, dot: false }
-  if (bucket === 'excellent') return { background: 'rgba(34,197,94,0.8)', border: '1px solid transparent', opacity: 1, dot: false }
+  if (bucket === 'excellent') return { background: 'rgba(34,197,94,0.80)', border: '1px solid transparent', opacity: 1, dot: false }
   return { background: 'rgba(255,255,255,0.04)', border: '1px solid transparent', opacity: 1, dot: false }
 }
 
@@ -671,28 +715,71 @@ export default function AnalyticsPage() {
 
   const heatmapData = useMemo(() => {
     const tradeDateById = {}
-    const dayMap = {}
-    const weekdayScoreMap = { Monday: [], Tuesday: [], Wednesday: [], Thursday: [], Friday: [] }
-    const criterionMap = {}
-
     for (const trade of yearTrades) {
       const iso = String(trade?.date || '').slice(0, 10)
-      if (!iso) continue
-      tradeDateById[trade.id] = iso
-      if (!dayMap[iso]) {
-        dayMap[iso] = {
-          date: iso,
-          tradeCount: 0,
-          ratingCount: 0,
-          scoreSum: 0,
-          score: null,
-          bestRule: null,
-          weakestRule: null,
-          criterionMap: {},
-        }
-      }
-      dayMap[iso].tradeCount += 1
+      if (trade?.id && iso) tradeDateById[trade.id] = iso
     }
+
+    const ratingsByTrade = {}
+    for (const row of yearRatings) {
+      const tid = row.trade_id
+      if (!tid) continue
+      if (!ratingsByTrade[tid]) ratingsByTrade[tid] = []
+      ratingsByTrade[tid].push(row)
+    }
+
+    const dayAccum = {}
+    for (const trade of yearTrades) {
+      const date = String(trade?.date || '').slice(0, 10)
+      if (!date) continue
+      if (!dayAccum[date]) {
+        dayAccum[date] = { scores: [], tradeCount: 0, hasRatings: false, trades: [] }
+      }
+      dayAccum[date].tradeCount += 1
+      dayAccum[date].trades.push(trade)
+
+      const tradeRatings = ratingsByTrade[trade.id] || []
+      if (tradeRatings.length > 0) {
+        dayAccum[date].hasRatings = true
+        for (const r of tradeRatings) {
+          const sc = heatmapGradeToScore(r.grade)
+          if (sc !== undefined) dayAccum[date].scores.push(sc)
+        }
+      } else if (trade.trade_grade != null && String(trade.trade_grade).trim() !== '') {
+        dayAccum[date].hasRatings = true
+        const sc = heatmapGradeToScore(trade.trade_grade)
+        if (sc !== undefined) dayAccum[date].scores.push(sc)
+      }
+    }
+
+    const finalDailyScores = {}
+    const dayMap = {}
+
+    for (const [date, data] of Object.entries(dayAccum)) {
+      const avgScore =
+        data.scores.length > 0
+          ? data.scores.reduce((a, b) => a + b, 0) / data.scores.length
+          : null
+      finalDailyScores[date] = {
+        score: avgScore,
+        tradeCount: data.tradeCount,
+        hasRatings: data.hasRatings,
+        trades: data.trades,
+      }
+      dayMap[date] = {
+        date,
+        tradeCount: data.tradeCount,
+        hasRatings: data.hasRatings,
+        score: avgScore,
+        ratingCount: data.scores.length,
+        bestRule: null,
+        weakestRule: null,
+        criterionMap: {},
+      }
+    }
+
+    const weekdayScoreMap = { Monday: [], Tuesday: [], Wednesday: [], Thursday: [], Friday: [] }
+    const criterionMap = {}
 
     for (const row of yearRatings) {
       const iso = tradeDateById[row.trade_id]
@@ -702,8 +789,6 @@ export default function AnalyticsPage() {
       const criterion = String(row.criterion || 'Uncategorized').trim() || 'Uncategorized'
       const grade = String(row.grade || '').trim().toUpperCase()
       const day = dayMap[iso]
-      day.ratingCount += 1
-      day.scoreSum += score
       if (!day.criterionMap[criterion]) day.criterionMap[criterion] = { count: 0, scoreSum: 0 }
       day.criterionMap[criterion].count += 1
       day.criterionMap[criterion].scoreSum += score
@@ -721,6 +806,16 @@ export default function AnalyticsPage() {
       criterionMap[criterion].totalRatings += 1
       criterionMap[criterion].scoreSum += score
       if (criterionMap[criterion].gradeCounts[grade] != null) criterionMap[criterion].gradeCounts[grade] += 1
+    }
+
+    for (const day of Object.values(dayMap)) {
+      const criteria = Object.entries(day.criterionMap).map(([criterion, item]) => ({
+        criterion,
+        avg: item.count ? item.scoreSum / item.count : 0,
+      }))
+      criteria.sort((a, b) => b.avg - a.avg)
+      day.bestRule = criteria[0]?.criterion || null
+      day.weakestRule = criteria[criteria.length - 1]?.criterion || null
     }
 
     const anchorDate = new Date(effectiveHeatmapYear, 11, 31, 23, 59, 59)
@@ -744,15 +839,7 @@ export default function AnalyticsPage() {
 
     const ratedDays = []
     for (const day of Object.values(dayMap)) {
-      if (day.ratingCount > 0) {
-        day.score = day.scoreSum / day.ratingCount
-        const criteria = Object.entries(day.criterionMap).map(([criterion, item]) => ({
-          criterion,
-          avg: item.count ? item.scoreSum / item.count : 0,
-        }))
-        criteria.sort((a, b) => b.avg - a.avg)
-        day.bestRule = criteria[0]?.criterion || null
-        day.weakestRule = criteria[criteria.length - 1]?.criterion || null
+      if (day.ratingCount > 0 && day.score != null && Number.isFinite(day.score)) {
         const wd = WEEKDAY_NAMES[new Date(`${day.date}T12:00:00`).getDay()]
         if (weekdayScoreMap[wd]) weekdayScoreMap[wd].push(day.score)
         ratedDays.push(day)
@@ -794,19 +881,52 @@ export default function AnalyticsPage() {
 
     const mostBrokenRule = ruleRows[0] || null
 
+    const tradeIdsWithRatings = new Set(yearRatings.map(r => r.trade_id).filter(Boolean))
+    let tradesWithDetailedRatings = 0
+    let tradesWithOverallGradeOnly = 0
+    let unratedTrades = 0
+    for (const t of yearTrades) {
+      if (tradeIdsWithRatings.has(t.id)) {
+        tradesWithDetailedRatings += 1
+      } else if (heatmapGradeToScore(t.trade_grade) !== undefined) {
+        tradesWithOverallGradeOnly += 1
+      } else {
+        unratedTrades += 1
+      }
+    }
+
     return {
       dayMap,
+      finalDailyScores,
       ratedDays,
       ruleRows,
       overallAdherence,
       bestWeekday,
       worstWeekday,
       mostBrokenRule,
+      heatmapDebug: {
+        totalTrades: yearTrades.length,
+        tradesWithDetailedRatings,
+        tradesWithOverallGradeOnly,
+        unratedTrades,
+        dateRange: `${effectiveHeatmapYear}-01-01 to ${effectiveHeatmapYear}-12-31`,
+      },
     }
   }, [effectiveHeatmapYear, yearRatings, yearTrades])
 
   const heatmapCalendar = useMemo(() => buildHeatmapCalendar(effectiveHeatmapYear), [effectiveHeatmapYear])
-  const hasRatedDays = heatmapData.ratedDays.length > 0
+  const heatmapYearTradeCount = yearTrades.length
+  const heatmapUnratedCount = heatmapData.heatmapDebug?.unratedTrades ?? 0
+  const showHeatmapEmptyOverlay = heatmapYearTradeCount === 0 && !ratingsLoading
+
+  useEffect(() => {
+    if (ratingsLoading) return
+    console.log('Trades fetched:', yearTrades.length)
+    console.log('Ratings fetched:', yearRatings.length)
+    console.log('Daily scores:', heatmapData.finalDailyScores)
+    console.log('Sample trade:', yearTrades[0])
+    console.log('Sample rating:', yearRatings[0])
+  }, [ratingsLoading, yearTrades, yearRatings, heatmapData.finalDailyScores])
 
   function onHeatmapHover(dayInfo, event) {
     if (!heatmapWrapRef.current || !dayInfo?.inYear) return
@@ -1621,6 +1741,24 @@ export default function AnalyticsPage() {
             </select>
           </div>
 
+          {heatmapYearTradeCount > 0 && heatmapUnratedCount > 0 && !ratingsLoading ? (
+            <div
+              style={{
+                marginBottom: '12px',
+                borderRadius: '8px',
+                border: '1px solid rgba(234,179,8,0.35)',
+                background: 'rgba(234,179,8,0.08)',
+                padding: '10px 12px',
+                fontSize: '12px',
+                color: 'var(--text2)',
+                lineHeight: 1.5,
+              }}
+              role="status"
+            >
+              You have {heatmapUnratedCount} trade{heatmapUnratedCount === 1 ? '' : 's'} without grades. Grade your trades when logging them to see your discipline patterns.
+            </div>
+          ) : null}
+
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)' }}>Poor</span>
@@ -1669,9 +1807,8 @@ export default function AnalyticsPage() {
                         {heatmapCalendar.weeks.map((week, weekIdx) => {
                           const day = week.days[rowIdx]
                           const dayStats = heatmapData.dayMap[day.iso]
-                          const bucket = adherenceBucket(dayStats)
-                          const style = adherenceStyle(bucket, day.inYear)
-                          const clickable = Boolean(day.inYear && dayStats?.ratingCount > 0)
+                          const style = heatmapCellStyle(dayStats, day.inYear)
+                          const clickable = Boolean(day.inYear && dayStats?.tradeCount > 0)
                           return (
                             <button
                               key={`day-${rowIdx}-${weekIdx}`}
@@ -1711,12 +1848,12 @@ export default function AnalyticsPage() {
               </div>
             </div>
 
-            {!hasRatedDays && !ratingsLoading ? (
+            {showHeatmapEmptyOverlay ? (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
                 <div style={{ pointerEvents: 'auto', textAlign: 'center', background: 'rgba(9,11,20,0.82)', border: '1px solid var(--border)', borderRadius: '10px', padding: '14px 16px', maxWidth: '460px' }}>
-                  <div style={{ fontSize: '16px', fontWeight: 650, marginBottom: '4px' }}>No rated trades yet</div>
+                  <div style={{ fontSize: '16px', fontWeight: 650, marginBottom: '4px' }}>No trades in {effectiveHeatmapYear}</div>
                   <div style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '10px', lineHeight: 1.55 }}>
-                    Start grading your trades using the A-F rating system when logging trades to see your discipline patterns here.
+                    Log trades for this year (with optional A–F grades) to see your rule adherence heatmap here.
                   </div>
                   <a href="/new-trade" style={{ pointerEvents: 'auto', fontSize: '12px', textDecoration: 'none', borderRadius: '8px', border: '1px solid rgba(124,58,237,0.45)', background: 'rgba(124,58,237,0.2)', color: 'var(--text)', padding: '7px 11px', fontWeight: 600 }}>
                     Log a Trade →
@@ -1750,7 +1887,7 @@ export default function AnalyticsPage() {
                   <div style={{ fontSize: '12px', color: 'var(--text)', marginBottom: '8px', fontWeight: 600 }}>{dateLabel}</div>
                   {!dayStats || dayStats.tradeCount === 0 ? (
                     <div style={{ fontSize: '12px', color: 'var(--text3)' }}>No trades this day</div>
-                  ) : dayStats.ratingCount === 0 ? (
+                  ) : !dayStats.hasRatings || dayStats.ratingCount === 0 ? (
                     <div style={{ fontSize: '12px', color: 'var(--text3)' }}>{dayStats.tradeCount} trades — not yet rated</div>
                   ) : (
                     <div style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>
@@ -1764,6 +1901,27 @@ export default function AnalyticsPage() {
                 </div>
               )
             })() : null}
+          </div>
+
+          <div
+            style={{
+              marginTop: '12px',
+              borderRadius: '8px',
+              border: '1px dashed rgba(255,255,255,0.2)',
+              background: 'rgba(255,255,255,0.03)',
+              padding: '10px 12px',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+              color: 'var(--text3)',
+              lineHeight: 1.6,
+            }}
+          >
+            <div style={{ fontWeight: 700, color: 'var(--text2)', marginBottom: '6px' }}>Heatmap debug (temporary)</div>
+            <div>Total trades found: {heatmapData.heatmapDebug?.totalTrades ?? 0}</div>
+            <div>Trades with detailed ratings: {heatmapData.heatmapDebug?.tradesWithDetailedRatings ?? 0}</div>
+            <div>Trades with overall grade only: {heatmapData.heatmapDebug?.tradesWithOverallGradeOnly ?? 0}</div>
+            <div>Unrated trades: {heatmapData.heatmapDebug?.unratedTrades ?? 0}</div>
+            <div>Date range: {heatmapData.heatmapDebug?.dateRange ?? '—'}</div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '10px', marginTop: '14px' }}>
