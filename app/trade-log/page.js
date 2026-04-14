@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { getAccountsForUser } from '@/lib/getAccountsForUser'
 import { getTradesForUser } from '@/lib/getTradesForUser'
@@ -10,6 +11,7 @@ import EditTradeModal from '@/components/EditTradeModal'
 import TradeReviewModal from '@/components/TradeReviewModal'
 
 export default function TradeLog() {
+  const searchParams = useSearchParams()
   const [trades, setTrades] = useState([])
   const [accounts, setAccounts] = useState([])
   const [strategies, setStrategies] = useState([])
@@ -20,6 +22,8 @@ export default function TradeLog() {
   const [editTrade, setEditTrade] = useState(null)
   const [reviewTrade, setReviewTrade] = useState(null)
   const [sessionUserId, setSessionUserId] = useState(null)
+
+  const selectedDate = String(searchParams.get('date') || '').slice(0, 10)
 
   useEffect(() => {
     fetchAccounts()
@@ -89,7 +93,8 @@ export default function TradeLog() {
     const matchAcct = selectedAccount === 'all' || t.account_id === selectedAccount
     const matchFilter = filter === 'all' || t.status === filter
     const matchSearch = !search || t.symbol?.toLowerCase().includes(search.toLowerCase())
-    return matchAcct && matchFilter && matchSearch
+    const matchDate = !selectedDate || String(t.date || '').slice(0, 10) === selectedDate
+    return matchAcct && matchFilter && matchSearch && matchDate
   })
 
   const wins = filtered.filter(t => t.status === 'Win')
