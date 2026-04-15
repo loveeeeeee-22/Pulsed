@@ -1,496 +1,961 @@
 'use client'
-import { useEffect, useState } from 'react'
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { useSearchParams } from 'next/navigation'
-import { Suspense } from 'react'
-import { useRef } from 'react'
-import { getTradesForUser } from '@/lib/getTradesForUser'
 
-function JournalContent() {
-  const searchParams = useSearchParams()
-  const [trades, setTrades] = useState([])
-  const [entries, setEntries] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [expandedDays, setExpandedDays] = useState({})
-  const [noteDay, setNoteDay] = useState(null)
-  const [noteText, setNoteText] = useState('')
-  const accent = '#7C3AED'
-  const [calDate, setCalDate] = useState(new Date())
-  const [previewImageSrc, setPreviewImageSrc] = useState(null)
-  const noteEditorRef = useRef(null)
-  const imageInputRef = useRef(null)
+const JOURNAL_TYPES = [
+  {
+    id: 'daily',
+    label: 'Daily Journal',
+    description: "Today's reflection",
+    shortLabel: 'DAILY JOURNAL',
+    placeholder:
+      "How did today's trading go?\nWhat did you observe in the market?\nHow are you feeling?",
+  },
+  {
+    id: 'weekly',
+    label: 'Weekly Journal',
+    description: 'Week in review',
+    shortLabel: 'WEEKLY JOURNAL',
+    placeholder:
+      'How was your trading week?\nWhat patterns did you notice?\nWhat will you do differently next week?',
+  },
+  {
+    id: 'monthly',
+    label: 'Monthly Journal',
+    description: 'Monthly summary',
+    shortLabel: 'MONTHLY JOURNAL',
+    placeholder:
+      "Reflect on this month's performance.\nWhat improved?\nWhat needs work? What are your goals for next month?",
+  },
+]
 
-  useEffect(() => {
-    document.documentElement.style.setProperty('--accent', '#7C3AED')
-    fetchAll()
-    const dateParam = searchParams.get('date')
-    if (dateParam) setNoteDay(dateParam)
-  }, [])
+function pad2(value) {
+  return String(value).padStart(2, '0')
+}
 
-  useEffect(() => {
-    if (!noteDay) return
-    setTimeout(() => {
-      normalizeEditorImages()
-    }, 0)
-  }, [noteDay])
+function startOfDay(date) {
+  const copy = new Date(date)
+  copy.setHours(0, 0, 0, 0)
+  return copy
+}
 
-  async function fetchAll() {
-    setLoading(true)
-    const { data: { session } } = await supabase.auth.getSession()
-    const uid = session?.user?.id
-    const journalPromise = uid
-      ? supabase.from('journal_entries').select('*').eq('user_id', uid)
-      : Promise.resolve({ data: [] })
-    const [{ data: t }, { data: e }] = await Promise.all([
-      getTradesForUser({ orderAscending: false }).then(data => ({ data })),
-      journalPromise,
-    ])
-    if (t) setTrades(t)
-    if (e) setEntries(e)
-    setLoading(false)
-  }
+function startOfWeek(date) {
+  const day = startOfDay(date)
+  const dow = day.getDay()
+  const diff = dow === 0 ? -6 : 1 - dow
+  day.setDate(day.getDate() + diff)
+  return day
+}
 
-  async function saveNote() {
-    const { data: { session } } = await supabase.auth.getSession()
-    const uid = session?.user?.id
-    if (!uid) return
-    const existing = entries.find(e => e.date === noteDay)
-    const html = noteEditorRef.current?.innerHTML || noteText
-    if (existing) {
-      await supabase.from('journal_entries').update({ pre_market_notes: html }).eq('id', existing.id)
-    } else {
-      await supabase.from('journal_entries').insert({ date: noteDay, pre_market_notes: html, user_id: uid })
-    }
-    await fetchAll()
-    setNoteDay(null)
-  }
+function endOfWeek(date) {
+  const start = startOfWeek(date)
+  const end = new Date(start)
+  end.setDate(start.getDate() + 6)
+  return end
+}
 
-  function focusEditor() {
-    if (noteEditorRef.current) noteEditorRef.current.focus()
-  }
-
-  function applyFormat(command, value = null) {
-    focusEditor()
-    document.execCommand(command, false, value)
-  }
-
-  function insertImageAtCaret(dataUrl) {
-    focusEditor()
-    document.execCommand('insertImage', false, dataUrl)
-    setTimeout(() => {
-      normalizeEditorImages()
-    }, 0)
-  }
-
-  function normalizeEditorImages() {
-    if (!noteEditorRef.current) return
-    const imgs = noteEditorRef.current.querySelectorAll('img')
-    imgs.forEach(img => {
-      img.style.maxWidth = '320px'
-      img.style.width = '100%'
-      img.style.height = 'auto'
-      img.style.maxHeight = '240px'
-      img.style.objectFit = 'contain'
-      img.style.display = 'block'
-      img.style.margin = '8px 0'
-      img.style.borderRadius = '8px'
-      img.style.cursor = 'zoom-in'
-      img.style.border = '1px solid var(--border)'
-    })
-  }
-
-  function handlePaste(e) {
-    const items = Array.from(e.clipboardData?.items || [])
-    const imageItem = items.find(item => item.type.startsWith('image/'))
-    if (!imageItem) return
-
-    e.preventDefault()
-    const file = imageItem.getAsFile()
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = reader.result
-      if (typeof dataUrl === 'string') {
-        insertImageAtCaret(dataUrl)
-      }
-    }
-    reader.readAsDataURL(file)
-  }
-
-  function handleImageUpload(e) {
-    const files = Array.from(e.target.files || [])
-    if (files.length === 0) return
-
-    files.forEach(file => {
-      if (!file.type.startsWith('image/')) return
-      const reader = new FileReader()
-      reader.onload = () => {
-        const dataUrl = reader.result
-        if (typeof dataUrl === 'string') {
-          insertImageAtCaret(dataUrl)
-        }
-      }
-      reader.readAsDataURL(file)
-    })
-
-    e.target.value = ''
-  }
-
-  // Group trades by date
-  const dayMap = {}
-  trades.forEach(t => {
-    const d = t.date?.slice(0, 10)
-    if (!d) return
-    if (!dayMap[d]) dayMap[d] = []
-    dayMap[d].push(t)
-  })
-
-  const sortedDays = Object.keys(dayMap).sort((a, b) => b.localeCompare(a))
-
-  const fmtPnl = (n) => (parseFloat(n) >= 0 ? '+$' : '-$') + Math.abs(parseFloat(n)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  const pnlColor = (n) => parseFloat(n) >= 0 ? '#22C55E' : '#EF4444'
-
-  // Calendar for right sidebar
-  const year = calDate.getFullYear()
-  const month = calDate.getMonth()
-  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December']
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const firstDow = new Date(year, month, 1).getDay()
-  const todayStr = new Date().toISOString().slice(0, 10)
-
-  const calDays = []
-  for (let i = 0; i < firstDow; i++) calDays.push(null)
-  for (let d = 1; d <= daysInMonth; d++) calDays.push(d)
-  while (calDays.length % 7 !== 0) calDays.push(null)
-
-  const dailyPnl = {}
-  trades.forEach(t => {
-    const d = t.date?.slice(0, 10)
-    if (!d) return
-    if (!dailyPnl[d]) dailyPnl[d] = 0
-    dailyPnl[d] += parseFloat(t.net_pnl || 0)
-  })
-
+function getWeekNumber(date) {
+  const day = startOfDay(date)
+  day.setDate(day.getDate() + 3 - ((day.getDay() + 6) % 7))
+  const week1 = new Date(day.getFullYear(), 0, 4)
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--page-bg)', color: 'var(--text)', fontFamily: 'sans-serif' }}>
+    1 +
+    Math.round(
+      ((day.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7,
+    )
+  )
+}
 
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px', borderBottom: '1px solid var(--border)', background: 'var(--card-bg)' }}>
-        <div>
-          <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Daily Journal</div>
-          <div style={{ fontSize: '18px', fontWeight: '600' }}>Trading Journal</div>
-        </div>
-      </div>
+function getIsoWeekYear(date) {
+  const day = startOfDay(date)
+  day.setDate(day.getDate() + 3 - ((day.getDay() + 6) % 7))
+  return day.getFullYear()
+}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 240px', gap: '0', minHeight: 'calc(100vh - 57px)' }}>
+function dateFromIsoWeek(weekYear, weekNumber) {
+  const jan4 = new Date(weekYear, 0, 4)
+  const jan4Dow = jan4.getDay() || 7
+  const monday = new Date(jan4)
+  monday.setDate(jan4.getDate() - jan4Dow + 1 + (weekNumber - 1) * 7)
+  monday.setHours(0, 0, 0, 0)
+  return monday
+}
 
-        {/* Main feed */}
-        <div style={{ padding: '20px 24px', borderRight: '1px solid var(--border)', overflowY: 'auto' }}>
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text3)', fontFamily: 'monospace', fontSize: '12px' }}>Loading...</div>
-          ) : sortedDays.length > 0 ? sortedDays.map(dateStr => {
-            const dayTrades = dayMap[dateStr]
-            const dayPnl = dayTrades.reduce((s, t) => s + parseFloat(t.net_pnl || 0), 0)
-            const dayWins = dayTrades.filter(t => t.status === 'Win')
-            const dayLosses = dayTrades.filter(t => t.status === 'Loss')
-            const dayGross = dayTrades.reduce((s, t) => s + parseFloat(t.gross_pnl || 0), 0)
-            const dayFees = dayTrades.reduce((s, t) => s + parseFloat(t.fees || 0), 0)
-            const dayGrossWin = dayWins.reduce((s, t) => s + parseFloat(t.net_pnl || 0), 0)
-            const dayGrossLoss = Math.abs(dayLosses.reduce((s, t) => s + parseFloat(t.net_pnl || 0), 0))
-            const dayPF = dayGrossLoss > 0 ? (dayGrossWin / dayGrossLoss).toFixed(2) : '—'
-            const dayWR = dayTrades.length ? ((dayWins.length / dayTrades.length) * 100).toFixed(2) : '0.00'
-            const isExpanded = expandedDays[dateStr]
-            const existingNote = entries.find(e => e.date === dateStr)
+function dayKey(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
 
-            // Mini equity curve for this day
-            let dayCum = 0
-            const dayEqPts = dayTrades.slice().reverse().map(t => { dayCum += parseFloat(t.net_pnl || 0); return dayCum })
-            const dEqW = 200, dEqH = 80
-            let dEqPath = '', dEqArea = ''
-            if (dayEqPts.length > 1) {
-              const minV = Math.min(0, ...dayEqPts), maxV = Math.max(0, ...dayEqPts)
-              const range = maxV - minV || 1
-              const coords = dayEqPts.map((v, i) => {
-                const x = (i / (dayEqPts.length - 1)) * dEqW
-                const y = dEqH - ((v - minV) / range) * (dEqH - 10) - 5
-                return `${x},${y}`
-              })
-              dEqPath = 'M' + coords.join('L')
-              dEqArea = dEqPath + `L${dEqW},${dEqH} L0,${dEqH} Z`
-            }
+function weekKey(date) {
+  const weekYear = getIsoWeekYear(date)
+  const weekNumber = getWeekNumber(date)
+  return `${weekYear}-W${pad2(weekNumber)}`
+}
 
-            const formattedDate = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+function monthKey(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`
+}
 
-            return (
-              <div key={dateStr} style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '12px', marginBottom: '12px', overflow: 'hidden' }}>
+function periodKeyFor(type, date) {
+  if (type === 'weekly') return weekKey(date)
+  if (type === 'monthly') return monthKey(date)
+  return dayKey(date)
+}
 
-                {/* Day header */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', cursor: 'pointer', borderBottom: isExpanded ? '1px solid var(--border)' : 'none' }}
-                  onClick={() => setExpandedDays(prev => ({ ...prev, [dateStr]: !prev[dateStr] }))}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'var(--bg3)', border: '1px solid var(--border-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: '11px', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(90deg)' : 'none' }}>›</div>
-                    <div style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text)' }}>{formattedDate}</div>
-                    <div style={{ fontSize: '14px', fontFamily: 'monospace', fontWeight: '600', color: pnlColor(dayPnl) }}>· Net P&L {fmtPnl(dayPnl)}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <button
-                      onClick={e => { e.stopPropagation(); setNoteText(existingNote?.pre_market_notes || ''); setNoteDay(dateStr) }}
-                      style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 12px', borderRadius: '7px', border: '1px solid var(--border-md)', background: existingNote?.pre_market_notes ? `${accent}20` : 'var(--bg3)', color: existingNote?.pre_market_notes ? accent : 'var(--text2)', cursor: 'pointer', fontSize: '11px', fontFamily: 'monospace' }}>
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.1"/><path d="M3 4h6M3 6.5h4" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/></svg>
-                      {existingNote?.pre_market_notes ? 'View Note' : 'Add Note'}
-                    </button>
-                  </div>
-                </div>
+function addPeriod(type, date, delta) {
+  const next = new Date(date)
+  if (type === 'weekly') {
+    next.setDate(next.getDate() + delta * 7)
+    return next
+  }
+  if (type === 'monthly') {
+    next.setMonth(next.getMonth() + delta)
+    return next
+  }
+  next.setDate(next.getDate() + delta)
+  return next
+}
 
-                {/* Collapsed view — mini chart + stats */}
-                {!isExpanded && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: '0', padding: '14px 18px', alignItems: 'center' }}>
-                    {dayEqPts.length > 1 ? (
-                      <svg width="100%" viewBox={`0 0 ${dEqW} ${dEqH}`} preserveAspectRatio="none" style={{ display: 'block' }}>
-                        <defs>
-                          <linearGradient id={`dg-${dateStr}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={dayPnl >= 0 ? '#22C55E' : '#EF4444'} stopOpacity="0.3"/>
-                            <stop offset="100%" stopColor={dayPnl >= 0 ? '#22C55E' : '#EF4444'} stopOpacity="0.02"/>
-                          </linearGradient>
-                        </defs>
-                        <path d={dEqArea} fill={`url(#dg-${dateStr})`}/>
-                        <path d={dEqPath} fill="none" stroke={dayPnl >= 0 ? '#22C55E' : '#EF4444'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    ) : (
-                      <div style={{ width: '200px', height: '60px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: '11px', fontFamily: 'monospace' }}>1 trade</div>
-                    )}
+function isFuturePeriod(type, date) {
+  const today = new Date()
+  if (type === 'daily') return startOfDay(date) > startOfDay(today)
+  if (type === 'weekly') return startOfWeek(date) > startOfWeek(today)
+  return date.getFullYear() > today.getFullYear() || (date.getFullYear() === today.getFullYear() && date.getMonth() > today.getMonth())
+}
 
-                    {/* Stats */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr) repeat(3,1fr)', gap: '0', borderLeft: '1px solid var(--border)', marginLeft: '16px', paddingLeft: '20px' }}>
-                      {[
-                        { label: 'Total Trades', value: dayTrades.length },
-                        { label: 'Winners', value: dayWins.length },
-                        { label: 'Gross P&L', value: `$${dayGross.toFixed(2)}` },
-                        { label: 'Winrate', value: dayWR + '%' },
-                        { label: 'Losers', value: dayLosses.length },
-                        { label: 'Commissions', value: `$${dayFees.toFixed(2)}` },
-                      ].map((stat, i) => (
-                        <div key={i} style={{ padding: '6px 10px', borderRight: i % 3 !== 2 ? '1px solid var(--border)' : 'none', borderBottom: i < 3 ? '1px solid var(--border)' : 'none' }}>
-                          <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginBottom: '3px' }}>{stat.label}</div>
-                          <div style={{ fontSize: '14px', fontFamily: 'monospace', fontWeight: '600', color: stat.label === 'Winners' ? '#22C55E' : stat.label === 'Losers' ? '#EF4444' : 'var(--text)' }}>{stat.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+function parsePeriodDate(type, key) {
+  if (!key) return new Date(0)
+  if (type === 'weekly') {
+    const [yearPart, weekPart] = String(key).split('-W')
+    const weekYear = Number(yearPart)
+    const weekNum = Number(weekPart)
+    if (!Number.isFinite(weekYear) || !Number.isFinite(weekNum)) return new Date(0)
+    return dateFromIsoWeek(weekYear, weekNum)
+  }
+  if (type === 'monthly') {
+    const [yearPart, monthPart] = String(key).split('-')
+    const year = Number(yearPart)
+    const month = Number(monthPart)
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return new Date(0)
+    return new Date(year, month - 1, 1)
+  }
+  return new Date(`${key}T00:00:00`)
+}
 
-                {/* Expanded — full trade table */}
-                {isExpanded && (
-                  <div style={{ padding: '14px 18px' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                          {['Time','Symbol','Direction','Contracts','Entry','Exit','Net P&L','Status','RR'].map(h => (
-                            <th key={h} style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: '400', padding: '0 12px 8px 0', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dayTrades.map((t, i) => {
-                          const pnl = parseFloat(t.net_pnl || 0)
-                          return (
-                            <tr key={i} style={{ borderBottom: i < dayTrades.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                              <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text2)', padding: '10px 12px 10px 0' }}>{t.entry_time || '—'}</td>
-                              <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text)', fontWeight: '600', padding: '10px 12px 10px 0' }}>{t.symbol}</td>
-                              <td style={{ fontSize: '12px', fontFamily: 'monospace', color: t.direction === 'Long' ? '#22C55E' : '#EF4444', padding: '10px 12px 10px 0' }}>{t.direction}</td>
-                              <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text2)', padding: '10px 12px 10px 0' }}>{t.contracts}</td>
-                              <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text2)', padding: '10px 12px 10px 0' }}>{t.entry_price}</td>
-                              <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text2)', padding: '10px 12px 10px 0' }}>{t.exit_price}</td>
-                              <td style={{ fontSize: '12px', fontFamily: 'monospace', color: pnlColor(pnl), fontWeight: '600', padding: '10px 12px 10px 0' }}>{fmtPnl(pnl)}</td>
-                              <td style={{ padding: '10px 12px 10px 0' }}>
-                                <span style={{ fontSize: '10px', fontFamily: 'monospace', padding: '2px 8px', borderRadius: '4px', background: t.status === 'Win' ? 'rgba(34,197,94,0.1)' : t.status === 'Loss' ? 'rgba(239,68,68,0.1)' : 'rgba(234,179,8,0.1)', color: t.status === 'Win' ? '#22C55E' : t.status === 'Loss' ? '#EF4444' : '#EAB308' }}>{t.status || '—'}</span>
-                              </td>
-                              <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text2)', padding: '10px 0' }}>{t.actual_rr ? t.actual_rr + 'R' : '—'}</td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )
-          }) : (
-            <div style={{ textAlign: 'center', padding: '80px', color: 'var(--text3)', fontFamily: 'monospace', fontSize: '13px' }}>
-              No trades logged yet.{' '}
-              <a href="/new-trade" style={{ color: accent }}>Log your first trade →</a>
-            </div>
-          )}
-        </div>
+function formatDailyTitle(date) {
+  const weekday = date.toLocaleDateString('en-US', { weekday: 'long' })
+  const month = date.toLocaleDateString('en-US', { month: 'long' })
+  return `${weekday}, ${month} ${date.getDate()} ${date.getFullYear()}`
+}
 
-        {/* Right sidebar — mini calendar */}
-        <div style={{ padding: '20px 16px', background: 'var(--card-bg)', borderTop: 'none' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <button onClick={() => setCalDate(new Date(year, month - 1, 1))}
-              style={{ width: '24px', height: '24px', borderRadius: '5px', border: '1px solid var(--border-md)', background: 'var(--bg3)', color: 'var(--text2)', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>‹</button>
-            <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text)' }}>{monthNames[month]} {year}</span>
-            <button onClick={() => setCalDate(new Date(year, month + 1, 1))}
-              style={{ width: '24px', height: '24px', borderRadius: '5px', border: '1px solid var(--border-md)', background: 'var(--bg3)', color: 'var(--text2)', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>›</button>
-          </div>
+function formatWeeklyTitle(date) {
+  const start = startOfWeek(date)
+  const end = endOfWeek(date)
+  const week = getWeekNumber(date)
+  const startMonth = start.toLocaleDateString('en-US', { month: 'long' })
+  const endMonth = end.toLocaleDateString('en-US', { month: 'long' })
+  const range =
+    startMonth === endMonth
+      ? `${startMonth} ${start.getDate()} – ${end.getDate()} ${end.getFullYear()}`
+      : `${startMonth} ${start.getDate()} – ${endMonth} ${end.getDate()} ${end.getFullYear()}`
+  return `Week ${week} · ${range}`
+}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: '2px', marginBottom: '4px' }}>
-            {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (
-              <div key={d} style={{ textAlign: 'center', fontSize: '9px', fontFamily: 'monospace', color: 'var(--text3)', paddingBottom: '4px' }}>{d}</div>
-            ))}
-          </div>
+function formatMonthlyTitle(date) {
+  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: '2px' }}>
-            {calDays.map((day, i) => {
-              if (!day) return <div key={i}/>
-              const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
-              const pnl = dailyPnl[dateStr]
-              const isToday = dateStr === todayStr
-              const isProfit = pnl && pnl > 0
-              const isLoss = pnl && pnl < 0
-              return (
-                <div key={i}
-                  onClick={() => pnl && setNoteDay(dateStr)}
-                  style={{
-                    height: '28px', borderRadius: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '10px', fontFamily: 'monospace', cursor: pnl ? 'pointer' : 'default',
-                    background: isToday ? `${accent}25` : isProfit ? 'rgba(34,197,94,0.15)' : isLoss ? 'rgba(239,68,68,0.15)' : 'transparent',
-                    color: isToday ? accent : isProfit ? '#22C55E' : isLoss ? '#EF4444' : 'var(--text3)',
-                    fontWeight: isToday || pnl ? '600' : '400',
-                    border: isToday ? `1px solid ${accent}` : '1px solid transparent',
-                  }}>
-                  {day}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      </div>
+function formatPeriodTitle(type, date) {
+  if (type === 'weekly') return formatWeeklyTitle(date)
+  if (type === 'monthly') return formatMonthlyTitle(date)
+  return formatDailyTitle(date)
+}
 
-      {/* Note Modal */}
-      {noteDay && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 400, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
-          onClick={e => { if (e.target === e.currentTarget) setNoteDay(null) }}>
-          <div style={{ background: 'var(--card-bg)', borderRadius: '16px', width: '100%', maxWidth: '700px', maxHeight: '85vh', overflow: 'auto', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 24px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text)' }}>
-                {new Date(noteDay + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-                {dailyPnl[noteDay] && <span style={{ fontSize: '13px', fontFamily: 'monospace', color: pnlColor(dailyPnl[noteDay]), marginLeft: '10px' }}>· Net P&L {fmtPnl(dailyPnl[noteDay])}</span>}
-              </div>
-              <button onClick={saveNote}
-                style={{ padding: '7px 18px', borderRadius: '8px', background: accent, color: '#fff', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>Save</button>
-            </div>
+function formatSidebarLabel(type, key) {
+  const date = parsePeriodDate(type, key)
+  if (type === 'weekly') {
+    const week = getWeekNumber(date)
+    const start = startOfWeek(date)
+    const end = endOfWeek(date)
+    const startMonth = start.toLocaleDateString('en-US', { month: 'short' })
+    const endMonth = end.toLocaleDateString('en-US', { month: 'short' })
+    const range =
+      startMonth === endMonth
+        ? `${startMonth} ${start.getDate()}-${end.getDate()}`
+        : `${startMonth} ${start.getDate()}-${endMonth} ${end.getDate()}`
+    return `Week ${week} · ${range}`
+  }
+  if (type === 'monthly') {
+    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  }
+  return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+}
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg3)', flexWrap: 'wrap' }}>
-              {[
-                { label: 'B', cmd: 'bold', style: { fontWeight: '700' } },
-                { label: 'I', cmd: 'italic', style: { fontStyle: 'italic' } },
-                { label: 'U', cmd: 'underline', style: { textDecoration: 'underline' } },
-                { label: 'S', cmd: 'strikeThrough', style: { textDecoration: 'line-through' } },
-              ].map(btn => (
-                <button key={btn.cmd}
-                  onMouseDown={e => { e.preventDefault(); applyFormat(btn.cmd) }}
-                  style={{ width: '28px', height: '28px', borderRadius: '5px', border: '1px solid var(--border-md)', background: 'none', color: 'var(--text)', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', ...btn.style }}>
-                  {btn.label}
-                </button>
-              ))}
-              <div style={{ width: '1px', height: '20px', background: 'var(--border-md)', margin: '0 4px' }}/>
-              {[
-                { label: '≡', cmd: 'insertUnorderedList' },
-                { label: '1.', cmd: 'insertOrderedList' },
-                { label: '❝', cmd: 'formatBlock', value: 'blockquote' },
-                { label: '↶', cmd: 'undo' },
-                { label: '↷', cmd: 'redo' },
-              ].map(btn => (
-                <button key={btn.cmd}
-                  onMouseDown={e => { e.preventDefault(); applyFormat(btn.cmd, btn.value || null) }}
-                  style={{ width: '28px', height: '28px', borderRadius: '5px', border: '1px solid var(--border-md)', background: 'none', color: 'var(--text)', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {btn.label}
-                </button>
-              ))}
-              <div style={{ width: '1px', height: '20px', background: 'var(--border-md)', margin: '0 4px' }}/>
-              <button
-                onMouseDown={e => { e.preventDefault(); focusEditor(); applyFormat('removeFormat') }}
-                style={{ borderRadius: '5px', border: '1px solid var(--border-md)', background: 'none', color: 'var(--text2)', cursor: 'pointer', fontSize: '11px', height: '28px', padding: '0 8px', fontFamily: 'monospace' }}
-              >
-                Clear
-              </button>
-              <button
-                onMouseDown={e => { e.preventDefault(); imageInputRef.current?.click() }}
-                style={{ borderRadius: '5px', border: '1px solid var(--border-md)', background: 'none', color: 'var(--text2)', cursor: 'pointer', fontSize: '11px', height: '28px', padding: '0 8px', fontFamily: 'monospace' }}
-              >
-                + Image
-              </button>
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleImageUpload}
-                style={{ display: 'none' }}
-              />
-            </div>
+function htmlToText(html) {
+  if (typeof window === 'undefined') return ''
+  const div = document.createElement('div')
+  div.innerHTML = html || ''
+  return (div.textContent || div.innerText || '').replace(/\s+/g, ' ').trim()
+}
 
-            <div style={{ padding: '16px 24px', minHeight: '280px' }}>
-              <div
-                id="noteEditor"
-                ref={noteEditorRef}
-                contentEditable
-                suppressContentEditableWarning
-                dangerouslySetInnerHTML={{ __html: entries.find(e => e.date === noteDay)?.pre_market_notes || '' }}
-                onPaste={handlePaste}
-                onInput={normalizeEditorImages}
-                onClick={e => {
-                  if (e.target?.tagName === 'IMG') {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    setPreviewImageSrc(e.target.getAttribute('src'))
-                  }
-                }}
-                style={{ minHeight: '240px', outline: 'none', fontSize: '14px', lineHeight: '1.8', color: 'var(--text)', fontFamily: 'sans-serif' }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+function getPreviewText(html) {
+  const text = htmlToText(html)
+  if (text.length <= 60) return text
+  return `${text.slice(0, 60)}...`
+}
 
-      {previewImageSrc && (
-        <div
-          onClick={() => setPreviewImageSrc(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 550,
-            background: 'rgba(0,0,0,0.85)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '24px',
-          }}
-        >
-          <img
-            src={previewImageSrc}
-            alt="Journal note preview"
-            style={{
-              maxWidth: '92vw',
-              maxHeight: '88vh',
-              width: 'auto',
-              height: 'auto',
-              borderRadius: '10px',
-              border: '1px solid var(--border-md)',
-              boxShadow: '0 22px 54px rgba(0,0,0,0.6)',
-            }}
-          />
-        </div>
-      )}
-    </div>
+function hasMeaningfulHtml(html) {
+  const text = htmlToText(html)
+  if (text.length > 0) return true
+  return /<(img|hr|ul|ol|li|h1|h2|h3|h4|h5|h6|blockquote|table)\b/i.test(html || '')
+}
+
+function formatRelativeSaved(lastSavedAt) {
+  if (!lastSavedAt) return 'Not saved yet'
+  const diffMs = Date.now() - lastSavedAt.getTime()
+  const seconds = Math.max(1, Math.floor(diffMs / 1000))
+  if (seconds < 60) return `Saved ${seconds} seconds ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `Saved ${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `Saved ${hours} hour${hours === 1 ? '' : 's'} ago`
+  const days = Math.floor(hours / 24)
+  return `Saved ${days} day${days === 1 ? '' : 's'} ago`
+}
+
+function JournalTypeIcon({ type, color }) {
+  if (type === 'weekly') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+        <rect x="2.5" y="4" width="15" height="13.5" rx="2.5" stroke={color} strokeWidth="1.5" />
+        <path d="M6 2.5V6M14 2.5V6M2.5 8.2H17.5" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+        <path d="M5.2 11.2H8.3M11.7 11.2H14.8M5.2 14.2H8.3M11.7 14.2H14.8" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  if (type === 'monthly') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+        <rect x="2.5" y="4" width="15" height="13.5" rx="2.5" stroke={color} strokeWidth="1.5" />
+        <path d="M6 2.5V6M14 2.5V6M2.5 8.2H17.5" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+        <path d="M5.2 11.2H14.8M5.2 14.2H11.5" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  return (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <rect x="2.5" y="4" width="15" height="13.5" rx="2.5" stroke={color} strokeWidth="1.5" />
+      <path d="M6 2.5V6M14 2.5V6M2.5 8.2H17.5M6 11.5H10.2" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
   )
 }
 
 export default function JournalPage() {
+  const [accent, setAccent] = useState('#7C3AED')
+  const [loading, setLoading] = useState(true)
+  const [userId, setUserId] = useState(null)
+  const [allEntries, setAllEntries] = useState([])
+  const [journalType, setJournalType] = useState('daily')
+  const [periodDate, setPeriodDate] = useState(() => new Date())
+  const [editorHtml, setEditorHtml] = useState('')
+  const [baselineHtml, setBaselineHtml] = useState('')
+  const [isDirty, setIsDirty] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [savedFlash, setSavedFlash] = useState(false)
+  const [lastSavedAt, setLastSavedAt] = useState(null)
+  const [pendingAction, setPendingAction] = useState(null)
+  const [expandedEntryIds, setExpandedEntryIds] = useState({})
+  const [hoveredEntryId, setHoveredEntryId] = useState(null)
+  const [refreshTick, setRefreshTick] = useState(0)
+  const editorRef = useRef(null)
+  const saveFlashTimerRef = useRef(null)
+  const typeMeta = useMemo(
+    () => JOURNAL_TYPES.find((item) => item.id === journalType) || JOURNAL_TYPES[0],
+    [journalType],
+  )
+
+  const periodKey = useMemo(() => periodKeyFor(journalType, periodDate), [journalType, periodDate])
+
+  const entriesForType = useMemo(() => {
+    return allEntries
+      .filter((entry) => entry.journal_type === journalType)
+      .sort((a, b) => {
+        const dateA = parsePeriodDate(journalType, a.period_key).getTime()
+        const dateB = parsePeriodDate(journalType, b.period_key).getTime()
+        if (dateA !== dateB) return dateB - dateA
+        const aUpdated = new Date(a.updated_at || a.created_at || 0).getTime()
+        const bUpdated = new Date(b.updated_at || b.created_at || 0).getTime()
+        return bUpdated - aUpdated
+      })
+  }, [allEntries, journalType])
+
+  const currentEntry = useMemo(() => {
+    return allEntries.find(
+      (entry) => entry.journal_type === journalType && entry.period_key === periodKey,
+    )
+  }, [allEntries, journalType, periodKey])
+
+  const editorPlainText = useMemo(() => htmlToText(editorHtml), [editorHtml])
+  const wordCount = useMemo(() => {
+    if (!editorPlainText) return 0
+    return editorPlainText.split(/\s+/).filter(Boolean).length
+  }, [editorPlainText])
+  const characterCount = editorPlainText.length
+  const placeholder = typeMeta.placeholder
+  const isEditorVisuallyEmpty = !hasMeaningfulHtml(editorHtml)
+  const titleText = formatPeriodTitle(journalType, periodDate)
+  const canGoNext = !isFuturePeriod(journalType, addPeriod(journalType, periodDate, 1))
+  const navLabels =
+    journalType === 'daily'
+      ? { prev: '← Yesterday', current: 'Today', next: 'Tomorrow →' }
+      : journalType === 'weekly'
+        ? { prev: '← Last week', current: 'This week', next: 'Next week →' }
+        : { prev: '← Last month', current: 'This month', next: 'Next month →' }
+
+  const fetchEntries = useCallback(async (uid) => {
+    if (!uid) {
+      setAllEntries([])
+      return []
+    }
+    const { data, error } = await supabase
+      .from('journal_entries')
+      .select('*')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: false })
+    if (error) {
+      console.error('Failed to fetch journal entries:', error.message)
+      return []
+    }
+    setAllEntries(data || [])
+    return data || []
+  }, [])
+
+  useEffect(() => {
+    const raw = typeof window !== 'undefined' ? window.localStorage.getItem('accentColor') : null
+    if (raw && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw)) {
+      setAccent(raw)
+      document.documentElement.style.setProperty('--accent', raw)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    async function bootstrap() {
+      setLoading(true)
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      const uid = session?.user?.id || null
+      if (!active) return
+      setUserId(uid)
+      await fetchEntries(uid)
+      if (active) setLoading(false)
+    }
+    bootstrap()
+    return () => {
+      active = false
+    }
+  }, [fetchEntries])
+
+  useEffect(() => {
+    if (isDirty) return
+    const nextHtml = currentEntry?.content || ''
+    setEditorHtml(nextHtml)
+    setBaselineHtml(nextHtml)
+    setLastSavedAt(currentEntry?.updated_at ? new Date(currentEntry.updated_at) : null)
+    if (editorRef.current && editorRef.current.innerHTML !== nextHtml) {
+      editorRef.current.innerHTML = nextHtml
+    }
+  }, [currentEntry, periodKey, journalType, isDirty])
+
+  useEffect(() => {
+    const interval = setInterval(() => setRefreshTick((value) => value + 1), 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    if (!savedFlash) return
+    if (saveFlashTimerRef.current) clearTimeout(saveFlashTimerRef.current)
+    saveFlashTimerRef.current = setTimeout(() => setSavedFlash(false), 3000)
+    return () => {
+      if (saveFlashTimerRef.current) clearTimeout(saveFlashTimerRef.current)
+    }
+  }, [savedFlash])
+
+  const runSave = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!userId || isSaving) return { ok: false }
+      const html = editorRef.current?.innerHTML || editorHtml
+      const existing = allEntries.find(
+        (entry) => entry.journal_type === journalType && entry.period_key === periodKey,
+      )
+      setIsSaving(true)
+      const nowIso = new Date().toISOString()
+      let error = null
+
+      if (existing?.id) {
+        const { error: updateError } = await supabase
+          .from('journal_entries')
+          .update({ content: html, updated_at: nowIso })
+          .eq('id', existing.id)
+        error = updateError
+      } else {
+        const { error: insertError } = await supabase.from('journal_entries').insert({
+          user_id: userId,
+          journal_type: journalType,
+          period_key: periodKey,
+          content: html,
+          created_at: nowIso,
+          updated_at: nowIso,
+        })
+        error = insertError
+      }
+
+      if (error) {
+        console.error('Failed to save journal entry:', error.message)
+        setIsSaving(false)
+        return { ok: false }
+      }
+
+      await fetchEntries(userId)
+      setBaselineHtml(html)
+      setEditorHtml(html)
+      setIsDirty(false)
+      setLastSavedAt(new Date())
+      setSavedFlash(true)
+      setIsSaving(false)
+      if (!silent) {
+        setPendingAction(null)
+      }
+      return { ok: true }
+    },
+    [allEntries, editorHtml, fetchEntries, isSaving, journalType, periodKey, userId],
+  )
+
+  useEffect(() => {
+    const autosave = setInterval(() => {
+      if (isDirty && userId && !isSaving) {
+        void runSave({ silent: true })
+      }
+    }, 30000)
+    return () => clearInterval(autosave)
+  }, [isDirty, isSaving, runSave, userId])
+
+  function runAction(action) {
+    if (!action) return
+    if (action.kind === 'type') {
+      setJournalType(action.value)
+      setPeriodDate(new Date())
+      setPendingAction(null)
+      return
+    }
+    if (action.kind === 'period') {
+      setPeriodDate(action.value)
+      setPendingAction(null)
+    }
+  }
+
+  function queueAction(action) {
+    if (isDirty) {
+      setPendingAction(action)
+      return
+    }
+    runAction(action)
+  }
+
+  async function onSavePendingAndContinue() {
+    const result = await runSave()
+    if (result.ok) {
+      runAction(pendingAction)
+    }
+  }
+
+  function onDiscardAndContinue() {
+    setIsDirty(false)
+    runAction(pendingAction)
+  }
+
+  function handleEditorInput() {
+    const html = editorRef.current?.innerHTML || ''
+    setEditorHtml(html)
+    setIsDirty(html !== baselineHtml)
+  }
+
+  function applyCommand(command, value = null) {
+    editorRef.current?.focus()
+    document.execCommand(command, false, value)
+    setTimeout(() => {
+      const html = editorRef.current?.innerHTML || ''
+      setEditorHtml(html)
+      setIsDirty(html !== baselineHtml)
+    }, 0)
+  }
+
+  function handleTypeClick(nextType) {
+    if (nextType === journalType) return
+    queueAction({ kind: 'type', value: nextType })
+  }
+
+  function handlePeriodNav(delta) {
+    const nextDate = addPeriod(journalType, periodDate, delta)
+    if (delta > 0 && isFuturePeriod(journalType, nextDate)) return
+    queueAction({ kind: 'period', value: nextDate })
+  }
+
+  function handleCurrentPeriod() {
+    const now = new Date()
+    if (periodKeyFor(journalType, now) === periodKey) return
+    queueAction({ kind: 'period', value: now })
+  }
+
+  async function handleDeleteEntry(entryId) {
+    if (!userId || !entryId) return
+    const previous = allEntries
+    setAllEntries((list) => list.filter((item) => item.id !== entryId))
+    const { error } = await supabase.from('journal_entries').delete().eq('id', entryId)
+    if (error) {
+      console.error('Failed to delete entry:', error.message)
+      setAllEntries(previous)
+      return
+    }
+    await fetchEntries(userId)
+  }
+
+  function toolbarButton(label, onClick, active = false) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        style={{
+          border: '1px solid var(--border)',
+          background: active ? 'var(--bg3)' : 'transparent',
+          color: 'var(--text2)',
+          borderRadius: '6px',
+          padding: '6px 8px',
+          minWidth: '28px',
+          cursor: 'pointer',
+          fontSize: '12px',
+          fontFamily: 'inherit',
+        }}
+      >
+        {label}
+      </button>
+    )
+  }
+
   return (
-    <Suspense fallback={<div style={{ padding: '40px', color: 'var(--text3)', fontFamily: 'monospace', fontSize: '12px' }}>Loading...</div>}>
-      <JournalContent />
-    </Suspense>
+    <div style={{ minHeight: '100vh', background: 'var(--page-bg)', color: 'var(--text)' }}>
+      <header
+        style={{
+          borderBottom: '1px solid var(--border)',
+          background: 'var(--card-bg)',
+          padding: '14px 24px',
+        }}
+      >
+        <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          Trading journal
+        </div>
+        <h1 style={{ margin: '4px 0 0', fontSize: '24px', fontWeight: 600 }}>Daily Journal</h1>
+      </header>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', minHeight: 'calc(100vh - 84px)' }}>
+        <aside
+          style={{
+            background: 'var(--bg2)',
+            borderRight: '1px solid var(--border)',
+            height: 'calc(100vh - 84px)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ padding: '14px 12px 12px' }}>
+            {JOURNAL_TYPES.map((type) => {
+              const isActive = type.id === journalType
+              const textColor = isActive ? accent : 'var(--text2)'
+              return (
+                <button
+                  key={type.id}
+                  type="button"
+                  onClick={() => handleTypeClick(type.id)}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '12px 16px',
+                    borderRadius: '8px',
+                    border: '1px solid transparent',
+                    borderLeft: isActive ? `3px solid ${accent}` : '3px solid transparent',
+                    background: isActive ? `${accent}26` : 'transparent',
+                    color: textColor,
+                    marginBottom: '8px',
+                    cursor: 'pointer',
+                    transition: 'background 0.15s ease',
+                  }}
+                  onMouseEnter={(event) => {
+                    if (!isActive) event.currentTarget.style.background = 'var(--bg3)'
+                  }}
+                  onMouseLeave={(event) => {
+                    if (!isActive) event.currentTarget.style.background = 'transparent'
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <JournalTypeIcon type={type.id} color={textColor} />
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 600 }}>{type.label}</div>
+                      <div style={{ fontSize: '12px', color: isActive ? textColor : 'var(--text3)' }}>{type.description}</div>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Saved Entries
+            </div>
+            <span
+              style={{
+                fontSize: '11px',
+                padding: '2px 8px',
+                borderRadius: '999px',
+                border: '1px solid var(--border)',
+                color: 'var(--text2)',
+                background: 'var(--bg3)',
+              }}
+            >
+              {entriesForType.length}
+            </span>
+          </div>
+
+          <div style={{ overflowY: 'auto', padding: '0 10px 14px', flex: 1 }}>
+            {loading ? (
+              <div style={{ color: 'var(--text3)', fontSize: '12px', padding: '12px' }}>Loading entries...</div>
+            ) : entriesForType.length === 0 ? (
+              <div style={{ color: 'var(--text3)', fontSize: '13px', padding: '12px' }}>No entries yet</div>
+            ) : (
+              entriesForType.map((entry) => {
+                const entryId = entry.id || `${entry.journal_type}:${entry.period_key}`
+                const expanded = Boolean(expandedEntryIds[entryId])
+                const preview = getPreviewText(entry.content)
+                return (
+                  <div
+                    key={entryId}
+                    onMouseEnter={() => setHoveredEntryId(entryId)}
+                    onMouseLeave={() => setHoveredEntryId(null)}
+                    style={{
+                      position: 'relative',
+                      border: '1px solid var(--border)',
+                      borderRadius: '8px',
+                      marginTop: '8px',
+                      overflow: 'hidden',
+                      background: expanded ? 'var(--bg3)' : 'transparent',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedEntryIds((prev) => ({
+                          ...prev,
+                          [entryId]: !prev[entryId],
+                        }))
+                      }
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr auto',
+                        gap: '8px',
+                        width: '100%',
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'inherit',
+                        textAlign: 'left',
+                        padding: '10px 10px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '3px' }}>
+                          {formatSidebarLabel(entry.journal_type, entry.period_key)}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: 'var(--text3)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {preview || 'Empty entry'}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ color: 'var(--text3)', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>
+                          ›
+                        </span>
+                      </div>
+                    </button>
+
+                    {hoveredEntryId === entryId ? (
+                      <button
+                        type="button"
+                        aria-label="Delete entry"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void handleDeleteEntry(entry.id)
+                        }}
+                        style={{
+                          position: 'absolute',
+                          top: '10px',
+                          right: '10px',
+                          border: 'none',
+                          width: '18px',
+                          height: '18px',
+                          lineHeight: '16px',
+                          borderRadius: '999px',
+                          background: 'rgba(239,68,68,0.14)',
+                          color: '#EF4444',
+                          cursor: 'pointer',
+                          padding: 0,
+                        }}
+                      >
+                        ×
+                      </button>
+                    ) : null}
+
+                    {expanded ? (
+                      <div
+                        style={{
+                          borderTop: '1px solid var(--border)',
+                          padding: '10px',
+                          fontSize: '12px',
+                          color: 'var(--text2)',
+                        }}
+                        dangerouslySetInnerHTML={{ __html: entry.content || '<p style="color:var(--text3)">Empty entry</p>' }}
+                      />
+                    ) : null}
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </aside>
+
+        <main style={{ background: 'var(--page-bg)', padding: '26px 24px 20px', overflowY: 'auto' }}>
+          <div style={{ maxWidth: '720px', margin: '0 auto', minHeight: 'calc(100vh - 130px)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontSize: '11px', fontFamily: 'monospace', letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text3)' }}>
+              {typeMeta.shortLabel}
+            </div>
+            <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+              <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 600, color: 'var(--text)' }}>{titleText}</h2>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => handlePeriodNav(-1)}
+                  style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: '7px',
+                    padding: '6px 10px',
+                    background: 'var(--bg2)',
+                    color: 'var(--text2)',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  {navLabels.prev}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCurrentPeriod}
+                  style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: '7px',
+                    padding: '6px 10px',
+                    background: 'transparent',
+                    color: 'var(--text3)',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  {navLabels.current}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePeriodNav(1)}
+                  disabled={!canGoNext}
+                  style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: '7px',
+                    padding: '6px 10px',
+                    background: canGoNext ? 'var(--bg2)' : 'transparent',
+                    color: canGoNext ? 'var(--text2)' : 'var(--text3)',
+                    cursor: canGoNext ? 'pointer' : 'not-allowed',
+                    fontSize: '12px',
+                    opacity: canGoNext ? 1 : 0.6,
+                  }}
+                >
+                  {navLabels.next}
+                </button>
+              </div>
+            </div>
+            <div style={{ borderBottom: '1px solid var(--border)', marginTop: '12px' }} />
+
+            {pendingAction ? (
+              <div
+                style={{
+                  marginTop: '12px',
+                  border: `1px solid ${accent}55`,
+                  background: `${accent}14`,
+                  color: 'var(--text2)',
+                  borderRadius: '8px',
+                  padding: '10px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '10px',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span style={{ fontSize: '13px' }}>You have unsaved changes — Save or Discard?</span>
+                <div style={{ display: 'inline-flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => void onSavePendingAndContinue()}
+                    style={{
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '6px 12px',
+                      background: accent,
+                      color: 'white',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                    }}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onDiscardAndContinue}
+                    style={{
+                      border: '1px solid var(--border)',
+                      borderRadius: '6px',
+                      padding: '6px 12px',
+                      background: 'transparent',
+                      color: 'var(--text2)',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                    }}
+                  >
+                    Discard
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            <div style={{ borderBottom: '1px solid var(--border)', padding: '8px 0', marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {toolbarButton('B', () => applyCommand('bold'))}
+              {toolbarButton('I', () => applyCommand('italic'))}
+              {toolbarButton('U', () => applyCommand('underline'))}
+              {toolbarButton('•', () => applyCommand('insertUnorderedList'))}
+              {toolbarButton('1.', () => applyCommand('insertOrderedList'))}
+              {toolbarButton('H', () => applyCommand('formatBlock', '<h2>'))}
+              {toolbarButton('—', () => applyCommand('insertHorizontalRule'))}
+              {toolbarButton('Clear', () => applyCommand('removeFormat'))}
+            </div>
+
+            <div
+              style={{
+                marginTop: '10px',
+                border: '1px solid var(--border)',
+                borderRadius: '12px',
+                background: 'var(--card-bg)',
+                flex: 1,
+                minHeight: '420px',
+                boxShadow: 'inset 0 0 0 1px transparent',
+              }}
+            >
+              <div
+                ref={editorRef}
+                contentEditable
+                suppressContentEditableWarning
+                onInput={handleEditorInput}
+                className="journal-editor"
+                data-placeholder={placeholder}
+                data-empty={isEditorVisuallyEmpty ? 'true' : 'false'}
+                style={{
+                  height: '100%',
+                  minHeight: '420px',
+                  outline: 'none',
+                  padding: '40px 60px',
+                  fontFamily: 'Georgia, serif',
+                  fontSize: '16px',
+                  lineHeight: 1.8,
+                  color: 'var(--text)',
+                  position: 'relative',
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                borderTop: '1px solid var(--border)',
+                marginTop: '14px',
+                paddingTop: '12px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '12px',
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ display: 'flex', gap: '14px', color: 'var(--text3)', fontSize: '12px' }}>
+                <span>{wordCount} words</span>
+                <span>{characterCount} characters</span>
+                <span key={refreshTick}>{savedFlash ? '✓ Saved' : formatRelativeSaved(lastSavedAt)}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void runSave()}
+                disabled={isSaving}
+                style={{
+                  border: 'none',
+                  borderRadius: '9px',
+                  padding: '10px 16px',
+                  background: accent,
+                  color: 'white',
+                  cursor: isSaving ? 'not-allowed' : 'pointer',
+                  fontWeight: 600,
+                  opacity: isSaving ? 0.8 : 1,
+                }}
+              >
+                {isSaving ? 'Saving...' : 'Save Entry'}
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+
+      <style jsx>{`
+        .journal-editor {
+          transition: box-shadow 0.15s ease, border-color 0.15s ease;
+          border-radius: 12px;
+        }
+
+        .journal-editor:focus {
+          box-shadow: 0 0 0 2px var(--accent-subtle);
+        }
+
+        .journal-editor[data-empty='true']::before {
+          content: attr(data-placeholder);
+          color: var(--text3);
+          white-space: pre-line;
+          pointer-events: none;
+          position: absolute;
+          top: 40px;
+          left: 60px;
+          right: 60px;
+        }
+      `}</style>
+    </div>
   )
 }
