@@ -1,59 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&family=DM+Serif+Display&display=swap');
+
 :root {
   --accent: #7C3AED;
   --accent-dim: #4C1D95;
-  --accent-subtle: rgba(124,58,237,0.08);
-  --accent-border: rgba(124,58,237,0.3);
-  --bg: #0D0D0D;
-  --bg2: #141414;
-  --bg3: #1C1C1C;
-  --bg4: #242424;
-  --border: rgba(255,255,255,0.07);
-  --border-md: rgba(255,255,255,0.12);
-  --border-strong: rgba(255,255,255,0.18);
-  --text: #F0EEE8;
-  --text2: #8A8880;
-  --text3: #555350;
+  --accent-subtle: rgba(124, 58, 237, 0.08);
+  --accent-border: rgba(124, 58, 237, 0.3);
+
+  /* Light mode defaults */
+  --page-bg: #F5F0E8;
+  --bg: #F5F0E8;
+  --bg2: #EDE8DC;
+  --bg3: #E5DFD0;
+  --bg4: #D9D2C0;
+  --card-bg: #FAF7F2;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-md: rgba(0, 0, 0, 0.13);
+  --border-strong: rgba(0, 0, 0, 0.2);
+  --text: #1A1714;
+  --text2: #4A4540;
+  --text3: #8A857D;
+
   --green: #22C55E;
   --loss: #EF4444;
-  --card-bg: #141414;
-  --page-bg: #0D0D0D;
+  --be: #EAB308;
+
+  --input-bg: #EDE8DC;
+  --input-border: rgba(0, 0, 0, 0.13);
+  --input-text: #1A1714;
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --ghost-border: rgba(0, 0, 0, 0.15);
+  --ghost-hover: rgba(0, 0, 0, 0.04);
+  --table-head-bg: #EDE8DC;
+  --table-row-hover: rgba(0, 0, 0, 0.02);
+  --table-border: rgba(0, 0, 0, 0.07);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
 }
 
 [data-theme="light"] {
-  --bg: #F4F2FF;
-  --bg2: #FFFFFF;
-  --bg3: #EDE9FE;
-  --bg4: #DDD6FE;
-  --border: rgba(0,0,0,0.07);
-  --border-md: rgba(0,0,0,0.12);
-  --border-strong: rgba(0,0,0,0.2);
-  --text: #1E1B2E;
-  --text2: #4B4668;
-  --text3: #9492A8;
-  --card-bg: #FFFFFF;
-  --page-bg: #F4F2FF;
+  --page-bg: #F5F0E8;
+  --bg: #F5F0E8;
+  --bg2: #EDE8DC;
+  --bg3: #E5DFD0;
+  --bg4: #D9D2C0;
+  --card-bg: #FAF7F2;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-md: rgba(0, 0, 0, 0.13);
+  --border-strong: rgba(0, 0, 0, 0.2);
+  --text: #1A1714;
+  --text2: #4A4540;
+  --text3: #8A857D;
+  --input-bg: #EDE8DC;
+  --input-border: rgba(0, 0, 0, 0.13);
+  --input-text: #1A1714;
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --ghost-border: rgba(0, 0, 0, 0.15);
+  --ghost-hover: rgba(0, 0, 0, 0.04);
+  --table-head-bg: #EDE8DC;
+  --table-row-hover: rgba(0, 0, 0, 0.02);
+  --table-border: rgba(0, 0, 0, 0.07);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="dark"] {
+  --page-bg: #0F0E0C;
+  --bg: #0F0E0C;
+  --bg2: #171512;
+  --bg3: #1F1D19;
+  --bg4: #272420;
+  --card-bg: #141210;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-md: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --text: #F2EDE4;
+  --text2: #A8A39B;
+  --text3: #6B6660;
+  --input-bg: #1F1D19;
+  --input-border: rgba(255, 255, 255, 0.1);
+  --input-text: #F2EDE4;
+  --card-shadow: none;
+  --ghost-border: rgba(255, 255, 255, 0.12);
+  --ghost-hover: rgba(255, 255, 255, 0.05);
+  --table-head-bg: #1F1D19;
+  --table-row-hover: rgba(255, 255, 255, 0.03);
+  --table-border: rgba(255, 255, 255, 0.07);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
 }
 
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  font-weight: 700;
   transition: background-color 0.2s, border-color 0.2s, color 0.15s;
 }
 
 body {
-  font-family: 'Space Grotesk', sans-serif;
-  background: var(--bg);
+  font-family: 'DM Sans', sans-serif;
+  background: var(--page-bg);
   color: var(--text);
+  -webkit-font-smoothing: antialiased;
 }
 
 input, select, textarea {
-  background: var(--bg3);
-  border: 1px solid var(--border-md);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
   border-radius: 7px;
-  color: var(--text);
-  font-family: 'IBM Plex Mono', monospace;
+  color: var(--input-text);
+  font-family: 'DM Sans', sans-serif;
   font-size: 12px;
   padding: 8px 11px;
   outline: none;
@@ -63,6 +115,7 @@ input, select, textarea {
 
 input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
+  outline: none;
 }
 
 input::placeholder, textarea::placeholder {
@@ -80,8 +133,58 @@ select {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-md);
+  background: var(--scrollbar-thumb);
   border-radius: 2px;
+}
+
+h1, h2, h3 {
+  font-family: 'DM Serif Display', serif;
+  color: var(--text);
+}
+
+code, pre, kbd, samp,
+.mono, .font-mono {
+  font-family: 'DM Mono', monospace;
+}
+
+/* Paper-like card surfaces */
+.card, .surface-card, [data-card="true"] {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  box-shadow: var(--card-shadow);
+}
+
+/* Secondary / ghost button defaults */
+button.ghost, .btn-ghost {
+  background: transparent;
+  border: 1px solid var(--ghost-border);
+  color: var(--text2);
+}
+
+button.ghost:hover, .btn-ghost:hover {
+  background: var(--ghost-hover);
+}
+
+/* Ensure accent buttons keep white text */
+button.primary, .btn-primary, button[data-variant="primary"] {
+  color: #fff;
+}
+
+table {
+  border-color: var(--table-border);
+}
+
+table th {
+  background: var(--table-head-bg);
+  border-color: var(--table-border);
+}
+
+table td {
+  border-color: var(--table-border);
+}
+
+table tbody tr:hover {
+  background: var(--table-row-hover);
 }
 
 /* TipTap / Word-style notes in trade review */
@@ -93,7 +196,7 @@ select {
   font-weight: 400;
   line-height: 1.55;
   color: var(--text);
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'DM Sans', sans-serif;
 }
 
 .trade-notes-prose p {
