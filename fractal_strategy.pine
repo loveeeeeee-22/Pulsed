@@ -1,0 +1,125 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © antigravity
+
+//@version=5
+indicator("Fractal Sweep & CISD Strategy [Final]", overlay=true, max_boxes_count=500, max_lines_count=500)
+
+// --- Inputs ---
+h4_tf = input.timeframe("240", "HTF Timeframe (4H)")
+m15_tf = input.timeframe("15", "MTF Timeframe (15m)")
+fvg_color = input.color(color.new(#d1d4dc, 70), "FVG Box Color (Ash 30% Opacity)")
+sweep_line_color = input.color(color.new(color.black, 66), "Sweep Line Color (Black 34% Opacity)")
+
+// --- State Variables ---
+var int STATE_IDLE = 0
+var int STATE_H4_SWEpt = 1
+var int STATE_M15_CISD = 2
+var int STATE_M15_FVG = 3
+var int STATE_M15_SWEPT_IN_FVG = 4
+
+var int current_state = STATE_IDLE
+var bool is_bullish_setup = false
+var float h4_sweep_level = na
+var float m15_cisd_level = na
+var float m15_fvg_top = na
+var float m15_fvg_bottom = na
+
+// --- Functions ---
+is_wick_sweep_high(h, c, level) => h > level and c < level
+is_wick_sweep_low(l, c, level) => l < level and c > level
+
+// --- Data Fetching ---
+[h4_h, h4_l, h4_o, h4_c, h4_ph, h4_pl, h4_po, h4_pc, h4_t, h4_conf] = request.security(syminfo.tickerid, h4_tf, [high, low, open, close, high[1], low[1], open[1], close[1], time, barstate.isconfirmed])
+[m15_h, m15_l, m15_o, m15_c, m15_ph, m15_pl, m15_po, m15_pc, m15_p2h, m15_p2l, m15_t, m15_conf] = request.security(syminfo.tickerid, m15_tf, [high, low, open, close, high[1], low[1], open[1], close[1], high[2], low[2], time, barstate.isconfirmed])
+
+// --- 1. 4H Wick Sweep Logic ---
+if h4_conf
+    h4_p_body_min = math.min(h4_po, h4_pc)
+    h4_p_body_max = math.max(h4_po, h4_pc)
+    
+    // Sweep high of previous candle and close in body
+    if is_wick_sweep_high(h4_h, h4_c, h4_ph) and h4_c >= h4_p_body_min and h4_c <= h4_p_body_max
+        current_state := STATE_H4_SWEpt
+        is_bullish_setup := false
+        h4_sweep_level := h4_ph
+        line.new(bar_index, h4_h, bar_index + 2, h4_h, color=sweep_line_color, width=1)
+        
+    // Sweep low of previous candle and close in body
+    if is_wick_sweep_low(h4_l, h4_c, h4_pl) and h4_c >= h4_p_body_min and h4_c <= h4_p_body_max
+        current_state := STATE_H4_SWEpt
+        is_bullish_setup := true
+        h4_sweep_level := h4_pl
+        line.new(bar_index, h4_l, bar_index + 2, h4_l, color=sweep_line_color, width=1)
+
+// --- 2. 15m Neo-style CISD Logic ---
+// We need to track the "sweeping sequence" on 15m
+var float sequence_start_price = na
+var bool in_sweep_sequence = false
+
+if m15_conf
+    if current_state == STATE_H4_SWEpt
+        // For Bearish setup: track up-candles sweeping liquidity
+        if not is_bullish_setup
+            if m15_c > m15_o // Up candle
+                if not in_sweep_sequence
+                    in_sweep_sequence := true
+                    sequence_start_price := m15_o
+            else // Down candle breaks the sequence
+                if in_sweep_sequence and m15_c < sequence_start_price
+                    current_state := STATE_M15_CISD
+                    m15_cisd_level := sequence_start_price
+                    label.new(bar_index, high, "15m CISD", color=color.black, style=label.style_label_down, textcolor=color.white, size=size.small)
+                    in_sweep_sequence := false
+        
+        // For Bullish setup: track down-candles sweeping liquidity
+        else
+            if m15_c < m15_o // Down candle
+                if not in_sweep_sequence
+                    in_sweep_sequence := true
+                    sequence_start_price := m15_o
+            else // Up candle breaks sequence
+                if in_sweep_sequence and m15_c > sequence_start_price
+                    current_state := STATE_M15_CISD
+                    m15_cisd_level := sequence_start_price
+                    label.new(bar_index, low, "15m CISD", color=color.black, style=label.style_label_up, textcolor=color.white, size=size.small)
+                    in_sweep_sequence := false
+
+// --- 3. 15m Fadi-style FVG Logic ---
+if m15_conf and current_state == STATE_M15_CISD
+    bool fvg_found = false
+    // Bearish FVG: m15_p2l > m15_h
+    if not is_bullish_setup and m15_p2l > m15_h
+        m15_fvg_top := m15_p2l
+        m15_fvg_bottom := m15_h
+        fvg_found := true
+    // Bullish FVG: m15_p2h < m15_l
+    else if is_bullish_setup and m15_p2h < m15_l
+        m15_fvg_top := m15_l
+        m15_fvg_bottom := m15_p2h
+        fvg_found := true
+        
+    if fvg_found
+        current_state := STATE_M15_FVG
+        box.new(bar_index - 2, m15_fvg_top, bar_index + 5, m15_fvg_bottom, bgcolor=fvg_color, border_width=0)
+
+// --- 4. 15m Wick Sweep in FVG ---
+if m15_conf and current_state == STATE_M15_FVG
+    if not is_bullish_setup
+        if is_wick_sweep_high(m15_h, m15_c, m15_ph) and m15_h <= m15_fvg_top and m15_h >= m15_fvg_bottom
+            current_state := STATE_M15_SWEPT_IN_FVG
+            line.new(bar_index, m15_h, bar_index + 2, m15_h, color=sweep_line_color, width=1)
+    else
+        if is_wick_sweep_low(m15_l, m15_c, m15_pl) and m15_l >= m15_fvg_bottom and m15_l <= m15_fvg_top
+            current_state := STATE_M15_SWEPT_IN_FVG
+            line.new(bar_index, m15_l, bar_index + 2, m15_l, color=sweep_line_color, width=1)
+
+// --- 5. 1m CISD Logic ---
+if current_state == STATE_M15_SWEPT_IN_FVG
+    // Final CISD on current timeframe (1m)
+    // Using single candle engulfing for 1m as it's the execution trigger
+    if not is_bullish_setup and close < open[1] and open > open[1]
+        label.new(bar_index, high, "1m CISD", color=color.red, style=label.style_label_down, textcolor=color.white, size=size.tiny)
+        current_state := STATE_IDLE
+    else if is_bullish_setup and close > open[1] and open < open[1]
+        label.new(bar_index, low, "1m CISD", color=color.green, style=label.style_label_up, textcolor=color.white, size=size.tiny)
+        current_state := STATE_IDLE

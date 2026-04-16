@@ -154,9 +154,9 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
   }, [accounts, form.account_id])
 
   const symbolOptions = useMemo(() => {
-    const type = String(selectedAccount?.type || '').toLowerCase()
-    return SYMBOLS_BY_ACCOUNT_TYPE[type] || []
-  }, [selectedAccount?.type])
+    const mType = String(selectedAccount?.market_type || 'futures').toLowerCase()
+    return SYMBOLS_BY_ACCOUNT_TYPE[mType] || []
+  }, [selectedAccount?.market_type])
 
   const plannedRr = useMemo(() => computePlannedRr(form.profit_target, form.stop_loss), [form.profit_target, form.stop_loss])
 
@@ -229,11 +229,12 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
     ;(async () => {
       setMetaLoading(true)
       const [accRows, stratRows] = await Promise.all([
-        getAccountsForUser(),
+        supabase.from('accounts').select('id, name, type, market_type').order('name', { ascending: true }),
         getStrategiesForUser({ select: 'id,name,rules', order: { column: 'name', ascending: true } }),
       ])
+      const accountsData = accRows.data || []
       if (cancelled) return
-      setAccounts(accRows || [])
+      setAccounts(accountsData)
       setStrategies(stratRows || [])
       setMetaLoading(false)
     })()
@@ -264,8 +265,9 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
 
   if (!trade) return null
 
-  const contractsLabel = selectedAccount?.type === 'forex' ? 'Lots' : 'Contracts'
-  const pointsLabel = selectedAccount?.type === 'forex' ? 'Pips' : 'Points'
+  const marketType = String(selectedAccount?.market_type || 'futures').toLowerCase()
+  const contractsLabel = marketType === 'forex' ? 'Lots' : 'Contracts'
+  const pointsLabel = marketType === 'forex' ? 'Pips' : 'Points'
   const tradeRiskLabel = 'Trade risk'
 
   async function handleSave(e) {
@@ -410,7 +412,7 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
                 <select style={inputStyle} value={form.account_id} onChange={e => setForm(f => ({ ...f, account_id: e.target.value }))}>
                   {accounts.map(account => (
                     <option key={account.id} value={account.id}>
-                      {account.name} ({account.type || 'Unknown'})
+                      {account.name} ({account.market_type ? account.market_type.charAt(0).toUpperCase() + account.market_type.slice(1) : "Futures"})
                     </option>
                   ))}
                 </select>

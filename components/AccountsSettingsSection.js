@@ -81,6 +81,7 @@ const emptyModal = {
   name: '',
   balance: '',
   accountType: 'personal',
+  marketType: 'futures',
   environment: 'live',
   broker: '',
   brokerOther: '',
@@ -220,6 +221,7 @@ export default function AccountsSettingsSection() {
       balance: bal,
       type: form.accountType,
       category: form.accountType,
+      market_type: form.marketType,
       provider: broker,
       broker,
       environment: form.environment,
@@ -351,7 +353,8 @@ export default function AccountsSettingsSection() {
                   {a.name}
                 </div>
                 <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', marginTop: '4px' }}>
-                  {(a.category || a.type) === 'prop' ? 'Prop Firm Account' : 'Personal Account'}
+                  {(a.category || a.type) === 'prop' ? 'Prop Firm' : 'Personal'}
+                  {a.market_type ? ` · ${a.market_type.charAt(0).toUpperCase() + a.market_type.slice(1)}` : ' · Futures'}
                   {(a.environment || 'live') === 'demo' ? ' · Demo' : ' · Live'}
                   {(a.broker || a.provider) ? ` · ${a.broker || a.provider}` : ''}
                 </div>
@@ -567,6 +570,34 @@ export default function AccountsSettingsSection() {
                     <span>
                       <strong style={{ display: 'block', fontSize: '13px', color: 'var(--text)' }}>Personal Account</strong>
                       <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Self-funded trading account</span>
+                    </span>
+                  </button>
+                </div>
+              </fieldset>
+
+              <fieldset style={{ border: 'none', margin: 0, padding: 0 }}>
+                <legend style={{ ...labelStyle, marginBottom: '8px' }}>Market type</legend>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, marketType: 'futures' }))}
+                    style={typeCardStyle(form.marketType === 'futures', accent)}
+                  >
+                    <span style={{ fontSize: '20px' }}>📊</span>
+                    <span>
+                      <strong style={{ display: 'block', fontSize: '13px', color: 'var(--text)' }}>Futures</strong>
+                      <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Contracts and Points</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, marketType: 'forex' }))}
+                    style={typeCardStyle(form.marketType === 'forex', accent)}
+                  >
+                    <span style={{ fontSize: '20px' }}>💱</span>
+                    <span>
+                      <strong style={{ display: 'block', fontSize: '13px', color: 'var(--text)' }}>Forex</strong>
+                      <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Lots and Pips</span>
                     </span>
                   </button>
                 </div>

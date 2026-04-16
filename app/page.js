@@ -9,7 +9,6 @@ import { compareTradesChronoAsc } from '@/lib/tradeSort'
 import { useTheme } from '@/lib/ThemeContext'
 import NewTradeToast from '@/components/NewTradeToast'
 import Link from 'next/link'
-import LandingPage from '@/components/LandingPage'
 
 function formatDateTick(dateStr) {
   if (!dateStr) return ''
@@ -370,7 +369,61 @@ export default function Dashboard() {
   const hideReviewedBanner = dismissedReviewedBannerForKey === latestLoggedTradeKey
 
   if (!authLoading && !sessionUser) {
-    return <LandingPage />
+    return (
+      <div style={{ minHeight: '100vh', background: 'var(--page-bg)', color: 'var(--text)', fontFamily: 'sans-serif', padding: '24px 16px' }}>
+        <div style={{ maxWidth: '980px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '26px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ fontFamily: 'monospace', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '11px' }}>
+                Pulsed
+              </div>
+              <div style={{ fontSize: '30px', fontWeight: 700, lineHeight: 1.1 }}>
+                A trading journal that keeps your process alive.
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--text3)', marginTop: '4px', lineHeight: 1.6 }}>
+                Track trades, replay performance, and build strategies you can actually improve.
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '14px', marginBottom: '22px' }}>
+            <div style={{ border: '1px solid var(--border)', borderRadius: '14px', background: 'var(--card-bg)', padding: '18px 18px 16px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)' }}>Get started</div>
+              <div style={{ fontSize: '13px', color: 'var(--text3)', marginTop: '8px', lineHeight: 1.6 }}>
+                Sign up to save your accounts, journal notes, and analytics. Log in anytime to see your latest performance.
+              </div>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '14px' }}>
+                <Link
+                  href="/auth?mode=signup"
+                  style={{ background: 'var(--accent)', color: '#fff', borderRadius: '10px', padding: '10px 16px', textDecoration: 'none', fontFamily: 'monospace', fontSize: '13px', fontWeight: 600 }}
+                >
+                  Sign up
+                </Link>
+                <Link
+                  href="/auth?mode=login"
+                  style={{ background: 'var(--bg3)', color: 'var(--text)', borderRadius: '10px', padding: '10px 16px', textDecoration: 'none', fontFamily: 'monospace', fontSize: '13px', fontWeight: 600, border: '1px solid var(--border)' }}
+                >
+                  Log in
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
+            {[
+              { title: 'Trade replay', desc: 'See entries, exits, and candle-by-candle replay to learn fast.' },
+              { title: 'Daily journal', desc: 'Capture notes and screenshots with constrained image sizing.' },
+              { title: 'Backtest insights', desc: 'Analyze performance, streaks, and trade grades.' },
+            ].map(card => (
+              <div key={card.title} style={{ border: '1px solid var(--border)', borderRadius: '14px', background: 'var(--card-bg)', padding: '16px' }}>
+                <div style={{ fontSize: '13px', fontFamily: 'monospace', color: 'var(--text)', fontWeight: 700 }}>{card.title}</div>
+                <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text3)', lineHeight: 1.6 }}>{card.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const today = new Date()

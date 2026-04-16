@@ -189,7 +189,7 @@ export default function NewTradePage() {
   async function loadMetadata() {
     setMetaLoading(true);
     const [nextAccounts, nextStrategies] = await Promise.all([
-      getAccountsForUser().then((rows) => rows.map((a) => ({ id: a.id, name: a.name, type: a.type }))),
+      getAccountsForUser().then((rows) => rows.map((a) => ({ id: a.id, name: a.name, type: a.type, market_type: a.market_type }))),
       getStrategiesForUser({ select: "id, name, rules", order: { column: "name", ascending: true } }),
     ]);
 
@@ -222,8 +222,8 @@ export default function NewTradePage() {
 
   useEffect(() => {
     const selectedAccount = accounts.find((a) => a.id === form.account_id);
-    const accountType = String(selectedAccount?.type || "").toLowerCase();
-    const options = SYMBOLS_BY_ACCOUNT_TYPE[accountType] || [];
+    const mType = String(selectedAccount?.market_type || "futures").toLowerCase();
+    const options = SYMBOLS_BY_ACCOUNT_TYPE[mType] || [];
     if (options.length === 0 || customSymbol) return;
     if (!form.symbol || !options.includes(form.symbol)) {
       setForm((prev) => ({ ...prev, symbol: options[0] }));
@@ -291,9 +291,9 @@ export default function NewTradePage() {
   const effectiveTradeGrade = overallGradeManual ? form.trade_grade : autoOverallFromCriteria;
 
   const selectedAccountForLabels = accounts.find(a => a.id === form.account_id)
-  const accountTypeForLabels = String(selectedAccountForLabels?.type || '').toLowerCase()
-  const contractsLabel = accountTypeForLabels === 'forex' ? 'Lots' : 'Contracts'
-  const pointsLabel = accountTypeForLabels === 'forex' ? 'Pips' : 'Points'
+  const marketTypeForLabels = String(selectedAccountForLabels?.market_type || 'futures').toLowerCase()
+  const contractsLabel = marketTypeForLabels === 'forex' ? 'Lots' : 'Contracts'
+  const pointsLabel = marketTypeForLabels === 'forex' ? 'Pips' : 'Points'
 
   function updateField(name, value) {
     if (name === "account_id" && typeof window !== "undefined") {
@@ -551,7 +551,7 @@ export default function NewTradePage() {
                   <option value="">Select account</option>
                   {accounts.map((account) => (
                     <option key={account.id} value={account.id}>
-                      {account.name} ({account.type || "Unknown"})
+                      {account.name} ({account.market_type ? account.market_type.charAt(0).toUpperCase() + account.market_type.slice(1) : "Futures"})
                     </option>
                   ))}
                 </select>
@@ -593,8 +593,8 @@ export default function NewTradePage() {
                 </label>
                 {(() => {
                   const selectedAccount = accounts.find((a) => a.id === form.account_id);
-                  const accountType = String(selectedAccount?.type || "").toLowerCase();
-                  const symbolOptions = SYMBOLS_BY_ACCOUNT_TYPE[accountType] || [];
+                  const mType = String(selectedAccount?.market_type || "futures").toLowerCase();
+                  const symbolOptions = SYMBOLS_BY_ACCOUNT_TYPE[mType] || [];
                   if (customSymbol || symbolOptions.length === 0) {
                     return (
                       <input
