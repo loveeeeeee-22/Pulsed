@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getAccountsForUser } from '@/lib/getAccountsForUser'
+import { fetchTradesForCurrentUser } from '@/lib/getTradesForUser'
 import { supabase } from '@/lib/supabase'
 
 const PROFIT_COLOR = '#22C55E'
@@ -316,7 +317,7 @@ export default function AnalyticsPage() {
   const [accounts, setAccounts] = useState([])
   const [selectedAccount, setSelectedAccount] = useState('all')
   const [selectedHeatmapYear, setSelectedHeatmapYear] = useState(new Date().getFullYear())
-  const [selectedRange, setSelectedRange] = useState('30d')
+  const [selectedRange, setSelectedRange] = useState('all')
   const [grouping, setGrouping] = useState('day')
   const [leftMetric, setLeftMetric] = useState('net_pnl')
   const [rightMetric, setRightMetric] = useState('win_rate')
@@ -333,6 +334,7 @@ export default function AnalyticsPage() {
   const [heatmapHover, setHeatmapHover] = useState(null)
   const [yearRatings, setYearRatings] = useState([])
   const [ratingsLoading, setRatingsLoading] = useState(false)
+  const [debugInfo, setDebugInfo] = useState({})
 
   useEffect(() => {
     let cancelled = false
@@ -345,27 +347,22 @@ export default function AnalyticsPage() {
       const {
         data: { user },
       } = await supabase.auth.getUser()
+      console.log('Current user ID:', user?.id)
 
-      let query = supabase.from('trades').select('*').order('date', { ascending: true })
-      if (selectedAccount && selectedAccount !== 'all') {
-        query = query.eq('account_id', selectedAccount)
+      const { trades: tradeRows, error: tradeFetchError } = await fetchTradesForCurrentUser({
+        orderAscending: true,
+      })
+
+      const debugData = {
+        rawTradeCount: tradeRows?.length || 0,
+        error: tradeFetchError || null,
+        firstTrade: tradeRows?.[0] || null,
+        allAccountIds: (accountRows || []).map(a => a.id) || [],
       }
-      const { data: tradeRows, error } = await query
-
-      console.log('Raw trades from DB:', tradeRows)
-      console.log('Fetch error:', error)
-      console.log('Current user:', user)
-      console.log('Trades after account filter:', tradeRows?.length)
-      console.log('Analytics - trades fetched:', tradeRows)
-      console.log('Analytics - trades count:', tradeRows?.length)
-      console.log('Analytics - fetch error:', error)
-      console.log('Analytics - selected account:', selectedAccount)
-
-      console.log('User ID:', user?.id)
-      console.log('First trade account_id:', tradeRows?.[0]?.account_id)
-      console.log('Accounts:', accountRows)
-      const userAccountIds = (accountRows || []).filter(a => a.user_id === user?.id).map(a => a.id)
-      console.log('User account IDs:', userAccountIds)
+      if (!cancelled) {
+        setDebugInfo(debugData)
+      }
+      console.log('ANALYTICS DEBUG:', debugData)
 
       if (!cancelled) {
         setAccounts(accountRows || [])
@@ -378,7 +375,7 @@ export default function AnalyticsPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedAccount])
+  }, [])
 
   const availableHeatmapYears = useMemo(() => {
     const currentYear = new Date().getFullYear()
@@ -395,10 +392,11 @@ export default function AnalyticsPage() {
     : (availableHeatmapYears[0] || new Date().getFullYear())
 
   const yearTrades = useMemo(() => {
-    return trades
+    const pool = selectedAccount === 'all' ? trades : trades.filter(t => t.account_id === selectedAccount)
+    return pool
       .filter(t => String(t.date || '').slice(0, 4) === String(effectiveHeatmapYear))
       .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
-  }, [trades, effectiveHeatmapYear])
+  }, [trades, effectiveHeatmapYear, selectedAccount])
 
   useEffect(() => {
     let cancelled = false
@@ -450,7 +448,10 @@ export default function AnalyticsPage() {
     console.log('Date filter start:', dateFrom)
     console.log('Sample trade date:', trades?.[0]?.date)
 
-    return trades
+    const byAccount =
+      selectedAccount === 'all' ? trades : trades.filter(t => t.account_id === selectedAccount)
+
+    return byAccount
       .filter(t => {
         if (!dateFrom) return true
         const d = String(t.date || '').slice(0, 10)
@@ -458,7 +459,7 @@ export default function AnalyticsPage() {
         return d >= dateFrom && d <= dateTo
       })
       .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
-  }, [trades, selectedRange])
+  }, [trades, selectedRange, selectedAccount])
 
   const grouped = useMemo(() => {
     const map = {}
@@ -1119,7 +1120,7 @@ export default function AnalyticsPage() {
     URL.revokeObjectURL(url)
   }
 
-  const dateRangeLabel = DATE_RANGES.find(r => r.id === selectedRange)?.label || 'Last 30 days'
+  const dateRangeLabel = DATE_RANGES.find(r => r.id === selectedRange)?.label || 'All time'
   const leftColor = accent
   const rightColor = PROFIT_COLOR
 
@@ -1150,6 +1151,31 @@ export default function AnalyticsPage() {
         fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
       }}
     >
+      {Object.keys(debugInfo).length > 0 && (
+        <div
+          style={{
+            background: 'rgba(239,68,68,0.1)',
+            border: '1px solid #EF4444',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            fontFamily: 'monospace',
+            fontSize: '12px',
+            color: '#EF4444',
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: '8px' }}>DEBUG INFO (remove before launch)</div>
+          <div>Raw trades from DB: {debugInfo.rawTradeCount}</div>
+          <div>Error: {debugInfo.error || 'none'}</div>
+          <div>Selected account: {selectedAccount}</div>
+          <div>Selected range: {selectedRange || 'none'}</div>
+          <div>After filters (charts): {filteredTrades.length}</div>
+          <div>First trade date: {debugInfo.firstTrade?.date}</div>
+          <div>First trade account_id: {debugInfo.firstTrade?.account_id}</div>
+          <div>Available account IDs: {debugInfo.allAccountIds.join(', ')}</div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '18px' }}>
         <h1 style={{ margin: 0, fontSize: '30px', fontWeight: 650, letterSpacing: '-0.02em', flex: '1 1 auto' }}>Reports</h1>
 
