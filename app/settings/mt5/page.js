@@ -479,13 +479,16 @@ export default function Mt5SettingsPage() {
             <p style={{ color: 'var(--text3)', fontFamily: 'monospace', fontSize: '12px' }}>Loading key…</p>
           ) : apiKey ? (
             <>
-              <label htmlFor="pulsed-mt5-api-key" style={{ display: 'block', fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginBottom: '6px' }}>
+              <label htmlFor="api-key" style={{ display: 'block', fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', marginBottom: '6px' }}>
                 Secret key
               </label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'stretch' }}>
                 <input
-                  id="pulsed-mt5-api-key"
+                  id="api-key"
+                  name="api-key"
+                  type="text"
                   readOnly
+                  autoComplete="off"
                   value={apiKey}
                   style={{
                     flex: '1 1 240px',
@@ -537,8 +540,11 @@ export default function Mt5SettingsPage() {
           ) : (
             <>
               <select
+                id="mt5-account-mapping"
+                name="mt5-account-mapping"
                 value={selectedAccountId}
                 onChange={(e) => persistAccount(e.target.value)}
+                autoComplete="off"
                 style={{
                   width: '100%',
                   maxWidth: '420px',

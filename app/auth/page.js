@@ -180,8 +180,12 @@ export default function AuthPage() {
 
         <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '10px' }}>
           <div>
-            <label style={labelStyle}>Email</label>
+            <label style={labelStyle} htmlFor="email">
+              Email
+            </label>
             <input
+              id="email"
+              name="email"
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
@@ -195,28 +199,83 @@ export default function AuthPage() {
             <>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
-                  <label style={labelStyle}>First name</label>
-                  <input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="Love" required />
+                  <label style={labelStyle} htmlFor="given-name">
+                    First name
+                  </label>
+                  <input
+                    id="given-name"
+                    name="given-name"
+                    type="text"
+                    value={firstName}
+                    onChange={e => setFirstName(e.target.value)}
+                    placeholder="Love"
+                    required
+                    autoComplete="given-name"
+                  />
                 </div>
                 <div>
-                  <label style={labelStyle}>Last name</label>
-                  <input value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Trades" required />
+                  <label style={labelStyle} htmlFor="family-name">
+                    Last name
+                  </label>
+                  <input
+                    id="family-name"
+                    name="family-name"
+                    type="text"
+                    value={lastName}
+                    onChange={e => setLastName(e.target.value)}
+                    placeholder="Trades"
+                    required
+                    autoComplete="family-name"
+                  />
                 </div>
               </div>
 
               <div>
-                <label style={labelStyle}>Username</label>
-                <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Shown on your dashboard" required />
+                <label style={labelStyle} htmlFor="username">
+                  Username
+                </label>
+                <input
+                  id="username"
+                  name="username"
+                  type="text"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  placeholder="Shown on your dashboard"
+                  required
+                  autoComplete="username"
+                />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
-                  <label style={labelStyle}>Phone number</label>
-                  <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 123 4567" />
+                  <label style={labelStyle} htmlFor="phone">
+                    Phone number
+                  </label>
+                  <input
+                    id="phone"
+                    name="phone"
+                    type="tel"
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    placeholder="+1 555 123 4567"
+                    autoComplete="tel"
+                  />
                 </div>
                 <div>
-                  <label style={labelStyle}>Country</label>
-                  <select value={countryCode} onChange={e => { setCountryCode(e.target.value); setCity('') }} style={{ width: '100%' }}>
+                  <label style={labelStyle} htmlFor="country">
+                    Country
+                  </label>
+                  <select
+                    id="country"
+                    name="country"
+                    autoComplete="country"
+                    value={countryCode}
+                    onChange={e => {
+                      setCountryCode(e.target.value)
+                      setCity('')
+                    }}
+                    style={{ width: '100%' }}
+                  >
                     <option value="">Select country…</option>
                     {Country.getAllCountries()
                       .slice()
@@ -231,8 +290,13 @@ export default function AuthPage() {
               </div>
 
               <div>
-                <label style={labelStyle}>City</label>
+                <label style={labelStyle} htmlFor="city">
+                  City
+                </label>
                 <select
+                  id="city"
+                  name="city"
+                  autoComplete="address-level2"
                   value={city}
                   onChange={e => setCity(e.target.value)}
                   style={{ width: '100%' }}
@@ -256,21 +320,22 @@ export default function AuthPage() {
 
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-              <label htmlFor="auth-password" style={{ ...labelStyle, marginBottom: 0 }}>
+              <label htmlFor="password" style={{ ...labelStyle, marginBottom: 0 }}>
                 {mode === 'signup' ? 'Create password' : 'Password'}
               </label>
               <button
                 type="button"
                 onClick={() => setShowPassword(v => !v)}
                 aria-pressed={showPassword}
-                aria-controls="auth-password"
+                aria-controls="password"
                 style={visibilityToggleStyle}
               >
                 {showPassword ? 'Hide' : 'Show'}
               </button>
             </div>
             <input
-              id="auth-password"
+              id="password"
+              name="password"
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={e => setPassword(e.target.value)}
@@ -285,21 +350,22 @@ export default function AuthPage() {
           {mode === 'signup' ? (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                <label htmlFor="auth-confirm-password" style={{ ...labelStyle, marginBottom: 0 }}>
+                <label htmlFor="confirm-password" style={{ ...labelStyle, marginBottom: 0 }}>
                   Confirm password
                 </label>
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(v => !v)}
                   aria-pressed={showConfirmPassword}
-                  aria-controls="auth-confirm-password"
+                  aria-controls="confirm-password"
                   style={visibilityToggleStyle}
                 >
                   {showConfirmPassword ? 'Hide' : 'Show'}
                 </button>
               </div>
               <input
-                id="auth-confirm-password"
+                id="confirm-password"
+                name="confirm-password"
                 type={showConfirmPassword ? 'text' : 'password'}
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}

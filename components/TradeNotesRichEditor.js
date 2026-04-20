@@ -311,7 +311,16 @@ const TradeNotesRichEditor = forwardRef(function TradeNotesRichEditor(
             <path d="M2 12l4-4 3 3 4-5 5 6" stroke="currentColor" strokeWidth="1" fill="none" strokeLinejoin="round" />
           </svg>
         </RibbonBtn>
-        <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={insertImage} />
+        <input
+          ref={fileInputRef}
+          id="trade-notes-image-upload"
+          name="trade-notes-image-upload"
+          type="file"
+          accept="image/*"
+          autoComplete="off"
+          style={{ display: 'none' }}
+          onChange={insertImage}
+        />
 
         {groupSep()}
 

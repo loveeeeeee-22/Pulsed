@@ -80,15 +80,18 @@ export default function AvatarCropModal({ imageSrc, onClose, onComplete }) {
           />
         </div>
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', color: 'var(--text2)' }}>
+          <label htmlFor="avatar-crop-zoom" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', color: 'var(--text2)' }}>
             <span style={{ fontFamily: 'monospace', color: 'var(--text3)', whiteSpace: 'nowrap' }}>Zoom</span>
             <input
+              id="avatar-crop-zoom"
+              name="avatar-crop-zoom"
               type="range"
               min={1}
               max={3}
               step={0.05}
               value={zoom}
               onChange={e => setZoom(Number(e.target.value))}
+              autoComplete="off"
               style={{ flex: 1, accentColor: 'var(--accent)' }}
             />
           </label>

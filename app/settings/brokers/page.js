@@ -756,8 +756,11 @@ export default function BrokersSettingsPage() {
                   Account
                 </label>
                 <select
+                  id="brokers-tv-connection"
+                  name="brokers-tv-connection"
                   value={selectedConnectionId || ''}
                   onChange={e => setSelectedConnectionId(e.target.value)}
+                  autoComplete="off"
                   style={{ maxWidth: '320px', fontWeight: 500 }}
                 >
                   {tradovateConnections.map(c => (
@@ -813,7 +816,14 @@ export default function BrokersSettingsPage() {
               <label style={{ fontSize: '11px', color: 'var(--text3)', display: 'block', marginBottom: '6px', fontWeight: 600 }}>
                 Initial import date range
               </label>
-              <select value={importRange} onChange={e => setImportRange(e.target.value)} style={{ fontWeight: 500 }}>
+              <select
+                id="brokers-import-range"
+                name="brokers-import-range"
+                value={importRange}
+                onChange={e => setImportRange(e.target.value)}
+                autoComplete="off"
+                style={{ fontWeight: 500 }}
+              >
                 {IMPORT_RANGE_OPTIONS.map(o => (
                   <option key={o.value} value={o.value}>
                     {o.label}
@@ -825,7 +835,14 @@ export default function BrokersSettingsPage() {
               <label style={{ fontSize: '11px', color: 'var(--text3)', display: 'block', marginBottom: '6px', fontWeight: 600 }}>
                 Auto-sync frequency
               </label>
-              <select value={syncFreq} onChange={e => setSyncFreq(e.target.value)} style={{ fontWeight: 500 }}>
+              <select
+                id="brokers-sync-frequency"
+                name="brokers-sync-frequency"
+                value={syncFreq}
+                onChange={e => setSyncFreq(e.target.value)}
+                autoComplete="off"
+                style={{ fontWeight: 500 }}
+              >
                 {SYNC_FREQ_OPTIONS.map(o => (
                   <option key={o.value} value={o.value}>
                     {o.label}
@@ -837,7 +854,14 @@ export default function BrokersSettingsPage() {
               <label style={{ fontSize: '11px', color: 'var(--text3)', display: 'block', marginBottom: '6px', fontWeight: 600 }}>
                 Default Pulsed account (pre-selected when connecting Tradovate)
               </label>
-              <select value={mapAccount} onChange={e => setMapAccount(e.target.value)} style={{ fontWeight: 500 }}>
+              <select
+                id="brokers-default-map-account"
+                name="brokers-default-map-account"
+                value={mapAccount}
+                onChange={e => setMapAccount(e.target.value)}
+                autoComplete="off"
+                style={{ fontWeight: 500 }}
+              >
                 <option value="">None — choose in connect flow</option>
                 {pulsedAccounts.map(a => (
                   <option key={a.id} value={a.id}>
@@ -846,12 +870,28 @@ export default function BrokersSettingsPage() {
                 ))}
               </select>
             </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}>
-              <input type="checkbox" checked={sessionCat} onChange={e => setSessionCat(e.target.checked)} style={{ accentColor: accent, width: '18px', height: '18px' }} />
+            <label htmlFor="brokers-session-categorization" style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}>
+              <input
+                id="brokers-session-categorization"
+                name="brokers-session-categorization"
+                type="checkbox"
+                checked={sessionCat}
+                onChange={e => setSessionCat(e.target.checked)}
+                autoComplete="off"
+                style={{ accentColor: accent, width: '18px', height: '18px' }}
+              />
               Automatically categorize trades by session
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}>
-              <input type="checkbox" checked={autoCommissions} onChange={e => setAutoCommissions(e.target.checked)} style={{ accentColor: accent, width: '18px', height: '18px' }} />
+            <label htmlFor="brokers-auto-commissions" style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}>
+              <input
+                id="brokers-auto-commissions"
+                name="brokers-auto-commissions"
+                type="checkbox"
+                checked={autoCommissions}
+                onChange={e => setAutoCommissions(e.target.checked)}
+                autoComplete="off"
+                style={{ accentColor: accent, width: '18px', height: '18px' }}
+              />
               Auto-calculate commissions from broker data
             </label>
           </div>
@@ -932,15 +972,15 @@ export default function BrokersSettingsPage() {
               <>
                 <p style={{ fontSize: '13px', color: 'var(--text2)', marginBottom: '14px', fontWeight: 600 }}>Step 1 — Environment</p>
                 <div style={{ display: 'grid', gap: '10px' }}>
-                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '12px 14px', borderRadius: '12px', border: tvEnv === 'live' ? `2px solid ${accent}` : '1px solid var(--border)', background: 'var(--bg3)', cursor: 'pointer' }}>
-                    <input type="radio" name="tv-env" checked={tvEnv === 'live'} onChange={() => setTvEnv('live')} style={{ marginTop: '3px', accentColor: accent }} />
+                  <label htmlFor="tv-env-live" style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '12px 14px', borderRadius: '12px', border: tvEnv === 'live' ? `2px solid ${accent}` : '1px solid var(--border)', background: 'var(--bg3)', cursor: 'pointer' }}>
+                    <input id="tv-env-live" name="tv-env" type="radio" checked={tvEnv === 'live'} onChange={() => setTvEnv('live')} autoComplete="off" style={{ marginTop: '3px', accentColor: accent }} />
                     <span>
                       <span style={{ fontWeight: 700, display: 'block' }}>Live trading</span>
                       <span style={{ fontSize: '12px', color: 'var(--text3)', fontWeight: 500 }}>Real money account</span>
                     </span>
                   </label>
-                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '12px 14px', borderRadius: '12px', border: tvEnv === 'demo' ? `2px solid ${accent}` : '1px solid var(--border)', background: 'var(--bg3)', cursor: 'pointer' }}>
-                    <input type="radio" name="tv-env" checked={tvEnv === 'demo'} onChange={() => setTvEnv('demo')} style={{ marginTop: '3px', accentColor: accent }} />
+                  <label htmlFor="tv-env-demo" style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '12px 14px', borderRadius: '12px', border: tvEnv === 'demo' ? `2px solid ${accent}` : '1px solid var(--border)', background: 'var(--bg3)', cursor: 'pointer' }}>
+                    <input id="tv-env-demo" name="tv-env" type="radio" checked={tvEnv === 'demo'} onChange={() => setTvEnv('demo')} autoComplete="off" style={{ marginTop: '3px', accentColor: accent }} />
                     <span>
                       <span style={{ fontWeight: 700, display: 'block' }}>Demo / simulation</span>
                       <span style={{ fontSize: '12px', color: 'var(--text3)', fontWeight: 500 }}>Paper trading account</span>
@@ -956,8 +996,11 @@ export default function BrokersSettingsPage() {
                   </label>
                   {pulsedAccounts.length ? (
                     <select
+                      id="tradovate-pulsed-account"
+                      name="tradovate-pulsed-account"
                       value={tvPulsedAccountId}
                       onChange={e => setTvPulsedAccountId(e.target.value)}
+                      autoComplete="off"
                       style={{ fontWeight: 500 }}
                     >
                       {pulsedAccounts.map(a => (
@@ -1003,12 +1046,12 @@ export default function BrokersSettingsPage() {
                 <p style={{ fontSize: '13px', color: 'var(--text2)', marginBottom: '14px', fontWeight: 600 }}>Step 2 — Credentials</p>
                 <div style={{ display: 'grid', gap: '12px' }}>
                   <div>
-                    <label style={{ fontSize: '11px', color: 'var(--text3)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Username</label>
-                    <input value={tvUser} onChange={e => setTvUser(e.target.value)} autoComplete="username" style={{ fontWeight: 500 }} />
+                    <label htmlFor="tradovate-username" style={{ fontSize: '11px', color: 'var(--text3)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Username</label>
+                    <input id="tradovate-username" name="username" type="text" value={tvUser} onChange={e => setTvUser(e.target.value)} autoComplete="username" style={{ fontWeight: 500 }} />
                   </div>
                   <div>
-                    <label style={{ fontSize: '11px', color: 'var(--text3)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Password</label>
-                    <input type="password" value={tvPass} onChange={e => setTvPass(e.target.value)} autoComplete="current-password" style={{ fontWeight: 500 }} />
+                    <label htmlFor="tradovate-password" style={{ fontSize: '11px', color: 'var(--text3)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>Password</label>
+                    <input id="tradovate-password" name="password" type="password" value={tvPass} onChange={e => setTvPass(e.target.value)} autoComplete="current-password" style={{ fontWeight: 500 }} />
                   </div>
                   <p style={{ fontSize: '11px', color: 'var(--text3)', lineHeight: 1.5, fontWeight: 500, margin: 0 }}>
                     Tradovate’s API usually needs an <strong style={{ color: 'var(--text2)' }}>API key</strong> from their developer portal (same environment as above). If you only use username and password, set{' '}
@@ -1020,6 +1063,9 @@ export default function BrokersSettingsPage() {
                       <InfoTooltip text="Shown when you create an API application in Tradovate. Numeric id paired with the secret below." />
                     </label>
                     <input
+                      id="tradovate-api-cid"
+                      name="tradovate-api-cid"
+                      type="text"
                       inputMode="numeric"
                       value={tvApiCid}
                       onChange={e => setTvApiCid(e.target.value)}
@@ -1034,6 +1080,8 @@ export default function BrokersSettingsPage() {
                       <InfoTooltip text="The secret string from the same API key. Stored encrypted like your password." />
                     </label>
                     <input
+                      id="tradovate-api-secret"
+                      name="tradovate-api-secret"
                       type="password"
                       value={tvApiSec}
                       onChange={e => setTvApiSec(e.target.value)}
@@ -1047,18 +1095,18 @@ export default function BrokersSettingsPage() {
                       Device ID
                       <InfoTooltip text="A unique id Tradovate uses to recognize this app installation. Regenerated each time you open this dialog." />
                     </label>
-                    <input readOnly value={deviceId} style={{ opacity: 0.85, fontWeight: 500, fontFamily: 'monospace', fontSize: '11px' }} />
+                    <input id="tradovate-device-id" name="tradovate-device-id" type="text" readOnly value={deviceId} autoComplete="off" style={{ opacity: 0.85, fontWeight: 500, fontFamily: 'monospace', fontSize: '11px' }} />
                   </div>
                   <div>
                     <label style={{ fontSize: '11px', color: 'var(--text3)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>
                       App ID
                       <InfoTooltip text="Must match the application name from your Tradovate API key (not necessarily “Pulsed”)." />
                     </label>
-                    <input value={tvAppId} onChange={e => setTvAppId(e.target.value)} placeholder="Pulsed" autoComplete="off" style={{ fontWeight: 500 }} />
+                    <input id="tradovate-app-id" name="tradovate-app-id" type="text" value={tvAppId} onChange={e => setTvAppId(e.target.value)} placeholder="Pulsed" autoComplete="off" style={{ fontWeight: 500 }} />
                   </div>
                   <div>
                     <label style={{ fontSize: '11px', color: 'var(--text3)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>App version</label>
-                    <input readOnly value={tvAppVer} style={{ fontWeight: 500 }} />
+                    <input id="tradovate-app-version" name="tradovate-app-version" type="text" readOnly value={tvAppVer} autoComplete="off" style={{ fontWeight: 500 }} />
                   </div>
                 </div>
                 <p style={{ marginTop: '14px', fontSize: '11px', color: 'var(--text3)', lineHeight: 1.5, fontWeight: 500 }}>

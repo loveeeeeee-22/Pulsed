@@ -362,10 +362,13 @@ export default function PlaybookPage() {
               ⌕
             </span>
             <input
+              id="search"
+              name="search"
               type="search"
               placeholder="Search playbooks…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              autoComplete="off"
               style={{
                 width: "100%",
                 boxSizing: "border-box",
@@ -379,19 +382,43 @@ export default function PlaybookPage() {
               }}
             />
           </div>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={selectStyle} aria-label="Filter by status">
+          <select
+            id="playbook-status-filter"
+            name="playbook-status-filter"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            style={selectStyle}
+            aria-label="Filter by status"
+            autoComplete="off"
+          >
             <option value="all">All status</option>
             <option value="active">Active</option>
             <option value="idle">Idle</option>
           </select>
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={selectStyle} aria-label="Filter by type">
+          <select
+            id="playbook-type-filter"
+            name="playbook-type-filter"
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            style={selectStyle}
+            aria-label="Filter by type"
+            autoComplete="off"
+          >
             {categories.map((c) => (
               <option key={c} value={c}>
                 {c === "all" ? "All types" : c}
               </option>
             ))}
           </select>
-          <select value={gridSort} onChange={(e) => setGridSort(e.target.value)} style={selectStyle} aria-label="Sort grid">
+          <select
+            id="playbook-grid-sort"
+            name="playbook-grid-sort"
+            value={gridSort}
+            onChange={(e) => setGridSort(e.target.value)}
+            style={selectStyle}
+            aria-label="Sort grid"
+            autoComplete="off"
+          >
             <option value="pnl">Sort: Total P&amp;L</option>
             <option value="wr">Sort: Win rate</option>
             <option value="pf">Sort: Profit factor</option>

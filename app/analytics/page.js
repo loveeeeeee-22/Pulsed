@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getAccountsForUser } from '@/lib/getAccountsForUser'
-import { getTradesForUser } from '@/lib/getTradesForUser'
 import { supabase } from '@/lib/supabase'
 
 const PROFIT_COLOR = '#22C55E'
@@ -27,7 +26,7 @@ const METRICS = [
   { id: 'trade_count', label: 'Trade Count', kind: 'number' },
 ]
 
-const SESSIONS = ['London', 'New York', 'Asian']
+const SESSIONS = ['London', 'New York', 'Asian', 'Other']
 const WEEKDAY_ROWS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -206,15 +205,32 @@ function fmtDayLong(dateStr) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function rangeStart(rangeId) {
+function toIsoDateLocal(d) {
+  if (!d || Number.isNaN(d.getTime())) return null
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** Inclusive YYYY-MM-DD range for analytics date filter (string compare safe). */
+function analyticsDateRange(rangeId) {
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  if (rangeId === 'all') return null
-  if (rangeId === 'month') return new Date(today.getFullYear(), today.getMonth(), 1)
-  if (rangeId === '7d') return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)
-  if (rangeId === '30d') return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29)
-  if (rangeId === '90d') return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 89)
-  return null
+  const dateTo = toIsoDateLocal(today)
+  if (rangeId === 'all') return { dateFrom: null, dateTo }
+  if (rangeId === 'month') {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1)
+    return { dateFrom: toIsoDateLocal(start), dateTo }
+  }
+  const ranges = {
+    '7d': new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6),
+    '30d': new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29),
+    '90d': new Date(today.getFullYear(), today.getMonth(), today.getDate() - 89),
+  }
+  const startDate = ranges[rangeId]
+  if (!startDate) return { dateFrom: null, dateTo }
+  return { dateFrom: toIsoDateLocal(startDate), dateTo }
 }
 
 function weekStart(dateObj) {
@@ -319,15 +335,50 @@ export default function AnalyticsPage() {
   const [ratingsLoading, setRatingsLoading] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
+
     async function load() {
       setLoading(true)
-      const [accountRows, tradeRows] = await Promise.all([getAccountsForUser(), getTradesForUser({ orderAscending: true })])
-      setAccounts(accountRows || [])
-      setTrades(tradeRows || [])
-      setLoading(false)
+      const accountRows = await getAccountsForUser()
+      console.log('Analytics - accounts:', accountRows)
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      let query = supabase.from('trades').select('*').order('date', { ascending: true })
+      if (selectedAccount && selectedAccount !== 'all') {
+        query = query.eq('account_id', selectedAccount)
+      }
+      const { data: tradeRows, error } = await query
+
+      console.log('Raw trades from DB:', tradeRows)
+      console.log('Fetch error:', error)
+      console.log('Current user:', user)
+      console.log('Trades after account filter:', tradeRows?.length)
+      console.log('Analytics - trades fetched:', tradeRows)
+      console.log('Analytics - trades count:', tradeRows?.length)
+      console.log('Analytics - fetch error:', error)
+      console.log('Analytics - selected account:', selectedAccount)
+
+      console.log('User ID:', user?.id)
+      console.log('First trade account_id:', tradeRows?.[0]?.account_id)
+      console.log('Accounts:', accountRows)
+      const userAccountIds = (accountRows || []).filter(a => a.user_id === user?.id).map(a => a.id)
+      console.log('User account IDs:', userAccountIds)
+
+      if (!cancelled) {
+        setAccounts(accountRows || [])
+        setTrades(tradeRows || [])
+        setLoading(false)
+      }
     }
+
     load()
-  }, [])
+    return () => {
+      cancelled = true
+    }
+  }, [selectedAccount])
 
   const availableHeatmapYears = useMemo(() => {
     const currentYear = new Date().getFullYear()
@@ -345,10 +396,9 @@ export default function AnalyticsPage() {
 
   const yearTrades = useMemo(() => {
     return trades
-      .filter(t => selectedAccount === 'all' || t.account_id === selectedAccount)
       .filter(t => String(t.date || '').slice(0, 4) === String(effectiveHeatmapYear))
       .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
-  }, [trades, selectedAccount, effectiveHeatmapYear])
+  }, [trades, effectiveHeatmapYear])
 
   useEffect(() => {
     let cancelled = false
@@ -395,17 +445,20 @@ export default function AnalyticsPage() {
   }, [yearTrades])
 
   const filteredTrades = useMemo(() => {
-    const start = rangeStart(selectedRange)
+    const { dateFrom, dateTo } = analyticsDateRange(selectedRange)
+    console.log('Analytics - date range:', dateFrom, dateTo)
+    console.log('Date filter start:', dateFrom)
+    console.log('Sample trade date:', trades?.[0]?.date)
+
     return trades
-      .filter(t => selectedAccount === 'all' || t.account_id === selectedAccount)
       .filter(t => {
-        if (!start) return true
-        const d = new Date(`${String(t.date || '').slice(0, 10)}T00:00:00`)
-        if (Number.isNaN(d.getTime())) return false
-        return d >= start
+        if (!dateFrom) return true
+        const d = String(t.date || '').slice(0, 10)
+        if (!d) return false
+        return d >= dateFrom && d <= dateTo
       })
       .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
-  }, [trades, selectedAccount, selectedRange])
+  }, [trades, selectedRange])
 
   const grouped = useMemo(() => {
     const map = {}
@@ -481,181 +534,263 @@ export default function AnalyticsPage() {
     }
   }, [chartRows, rightMetric])
 
-  const overallStats = useMemo(() => {
-    const totalTrades = filteredTrades.length
-    const totalPnl = filteredTrades.reduce((s, t) => s + asNum(t.net_pnl), 0)
-    const wins = filteredTrades.filter(t => t.status === 'Win')
-    const losses = filteredTrades.filter(t => t.status === 'Loss')
-    const grossWin = wins.reduce((s, t) => s + Math.max(0, asNum(t.gross_pnl)), 0)
-    const grossLoss = Math.abs(losses.reduce((s, t) => s + Math.min(0, asNum(t.gross_pnl)), 0))
-    const winRate = totalTrades ? wins.length / totalTrades : 0
-    const expectancy = totalTrades ? totalPnl / totalTrades : 0
-    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0
+  const { overallStats, outcomeStats, activityStats, symbolRows, sessionRows } = useMemo(() => {
+    const filtered = filteredTrades
 
-    return {
-      totalPnl,
-      totalTrades,
-      averageTradePnl: expectancy,
-      expectancy,
-      profitFactor,
-      winRate,
-      insight: buildInsightOverall({ totalPnl, expectancy, profitFactor, winRate }),
-    }
-  }, [filteredTrades])
+    const wins = filtered.filter(t => t.status === 'Win')
+    const losses = filtered.filter(t => t.status === 'Loss')
+    const breakevens = filtered.filter(t => t.status === 'Breakeven')
 
-  const outcomeStats = useMemo(() => {
-    let largestProfit = 0
-    let largestLoss = 0
-    let wins = 0
-    let losses = 0
-    let breakeven = 0
-    let curWin = 0
-    let curLoss = 0
-    let maxWinStreak = 0
-    let maxLossStreak = 0
+    const totalPnl = filtered.reduce((s, t) => s + parseFloat(t.net_pnl || 0), 0)
 
-    for (const t of filteredTrades) {
-      const pnl = asNum(t.net_pnl)
-      if (pnl > largestProfit) largestProfit = pnl
-      if (pnl < largestLoss) largestLoss = pnl
+    const grossWin = wins.reduce((s, t) => s + parseFloat(t.net_pnl || 0), 0)
+
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + parseFloat(t.net_pnl || 0), 0))
+
+    const winRateStr =
+      filtered.length > 0 ? ((wins.length / filtered.length) * 100).toFixed(1) : '0.0'
+    const winRateRatio = filtered.length > 0 ? wins.length / filtered.length : 0
+
+    const profitFactorNum =
+      grossLoss > 0 ? grossWin / grossLoss : wins.length > 0 ? Infinity : 0
+
+    const averageTradePnlNum = filtered.length > 0 ? totalPnl / filtered.length : 0
+    const expectancyNum = averageTradePnlNum
+
+    const largestProfit =
+      filtered.length > 0 ? Math.max(...filtered.map(t => parseFloat(t.net_pnl || 0))) : 0
+    const largestLoss =
+      filtered.length > 0 ? Math.min(...filtered.map(t => parseFloat(t.net_pnl || 0))) : 0
+
+    let maxConsecWins = 0
+    let maxConsecLosses = 0
+    let currentWins = 0
+    let currentLosses = 0
+    filtered.forEach(t => {
       if (t.status === 'Win') {
-        wins += 1
-        curWin += 1
-        curLoss = 0
-        maxWinStreak = Math.max(maxWinStreak, curWin)
+        currentWins++
+        currentLosses = 0
+        maxConsecWins = Math.max(maxConsecWins, currentWins)
       } else if (t.status === 'Loss') {
-        losses += 1
-        curLoss += 1
-        curWin = 0
-        maxLossStreak = Math.max(maxLossStreak, curLoss)
+        currentLosses++
+        currentWins = 0
+        maxConsecLosses = Math.max(maxConsecLosses, currentLosses)
       } else {
-        breakeven += 1
-        curWin = 0
-        curLoss = 0
-      }
-    }
-    return {
-      wins,
-      losses,
-      breakeven,
-      largestProfit,
-      largestLoss,
-      maxWinStreak,
-      maxLossStreak,
-      insight: buildInsightOutcomes({ wins, losses, maxWinStreak, maxLossStreak, largestProfit, largestLoss }),
-    }
-  }, [filteredTrades])
-
-  const activityStats = useMemo(() => {
-    const dayMap = {}
-    const sessionMap = { London: { pnl: 0, trades: 0 }, 'New York': { pnl: 0, trades: 0 }, Asian: { pnl: 0, trades: 0 } }
-    const symbolMap = {}
-    const loggedDaysSet = new Set()
-    let totalContracts = 0
-
-    for (const t of filteredTrades) {
-      const date = String(t.date || '').slice(0, 10)
-      if (!date) continue
-      const pnl = asNum(t.net_pnl)
-      totalContracts += asNum(t.contracts)
-      loggedDaysSet.add(date)
-      dayMap[date] = (dayMap[date] || 0) + pnl
-      if (sessionMap[t.session]) {
-        sessionMap[t.session].pnl += pnl
-        sessionMap[t.session].trades += 1
-      }
-      const sym = t.symbol || '—'
-      symbolMap[sym] = (symbolMap[sym] || 0) + pnl
-    }
-
-    const dayPnls = Object.entries(dayMap)
-    const tradingDays = dayPnls.length
-    const avgDailyVolume = tradingDays ? totalContracts / tradingDays : 0
-    const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-    let bestDay = '—'
-    let bestDayPnl = -Infinity
-    for (const [date, pnl] of dayPnls) {
-      if (pnl > bestDayPnl) {
-        bestDayPnl = pnl
-        const wd = new Date(`${date}T12:00:00`).getDay()
-        bestDay = weekdays[wd] || '—'
-      }
-    }
-
-    let bestSession = '—'
-    let bestSessionPnl = -Infinity
-    for (const [name, s] of Object.entries(sessionMap)) {
-      if (s.pnl > bestSessionPnl) {
-        bestSessionPnl = s.pnl
-        bestSession = name
-      }
-    }
-
-    let bestSymbol = '—'
-    let bestSymbolPnl = -Infinity
-    for (const [sym, pnl] of Object.entries(symbolMap)) {
-      if (pnl > bestSymbolPnl) {
-        bestSymbolPnl = pnl
-        bestSymbol = sym
-      }
-    }
-
-    return {
-      avgDailyVolume,
-      tradingDays,
-      loggedDays: loggedDaysSet.size,
-      bestDay,
-      bestSession,
-      bestSymbol,
-      insight: buildInsightActivity({
-        tradingDays,
-        loggedDays: loggedDaysSet.size,
-        bestSession,
-        bestSymbol,
-      }),
-    }
-  }, [filteredTrades])
-
-  const symbolRows = useMemo(() => {
-    const map = {}
-    for (const t of filteredTrades) {
-      const sym = t.symbol || '—'
-      if (!map[sym]) {
-        map[sym] = { symbol: sym, trades: 0, wins: 0, net: 0, best: -Infinity, worst: Infinity }
-      }
-      const pnl = asNum(t.net_pnl)
-      map[sym].trades += 1
-      if (t.status === 'Win') map[sym].wins += 1
-      map[sym].net += pnl
-      map[sym].best = Math.max(map[sym].best, pnl)
-      map[sym].worst = Math.min(map[sym].worst, pnl)
-    }
-    return Object.values(map)
-      .map(r => ({
-        ...r,
-        winRate: r.trades ? r.wins / r.trades : 0,
-        avg: r.trades ? r.net / r.trades : 0,
-        best: Number.isFinite(r.best) ? r.best : 0,
-        worst: Number.isFinite(r.worst) ? r.worst : 0,
-      }))
-      .sort((a, b) => b.net - a.net)
-  }, [filteredTrades])
-
-  const sessionRows = useMemo(() => {
-    const rows = SESSIONS.map(name => {
-      const list = filteredTrades.filter(t => t.session === name)
-      const tradesCount = list.length
-      const wins = list.filter(t => t.status === 'Win').length
-      const net = list.reduce((s, t) => s + asNum(t.net_pnl), 0)
-      return {
-        name,
-        trades: tradesCount,
-        winRate: tradesCount ? wins / tradesCount : 0,
-        net,
+        currentWins = 0
+        currentLosses = 0
       }
     })
-    const maxAbs = Math.max(...rows.map(r => Math.abs(r.net)), 1)
-    return rows.map(r => ({ ...r, pct: (Math.abs(r.net) / maxAbs) * 100 }))
+
+    const totalVolume = filtered.reduce((s, t) => s + parseFloat(t.contracts || 0), 0)
+
+    const tradingDays = new Set(filtered.map(t => t.date?.slice(0, 10)).filter(Boolean)).size
+
+    const avgDailyVolumeNum = tradingDays > 0 ? totalVolume / tradingDays : 0
+
+    const symbolMap = {}
+    filtered.forEach(t => {
+      const sym = t.symbol || '—'
+      if (!symbolMap[sym]) {
+        symbolMap[sym] = {
+          pnl: 0,
+          trades: 0,
+          wins: 0,
+        }
+      }
+      symbolMap[sym].pnl += parseFloat(t.net_pnl || 0)
+      symbolMap[sym].trades++
+      if (t.status === 'Win') symbolMap[sym].wins++
+    })
+
+    const bestSymbol = Object.entries(symbolMap).sort(([, a], [, b]) => b.pnl - a.pnl)[0]
+
+    const sessionMapAgg = {}
+    filtered.forEach(t => {
+      const sess = t.session || 'Other'
+      if (!sessionMapAgg[sess]) {
+        sessionMapAgg[sess] = { pnl: 0, trades: 0 }
+      }
+      sessionMapAgg[sess].pnl += parseFloat(t.net_pnl || 0)
+      sessionMapAgg[sess].trades++
+    })
+
+    const bestSession = Object.entries(sessionMapAgg).sort(([, a], [, b]) => b.pnl - a.pnl)[0]
+
+    const dowMap = {}
+    filtered.forEach(t => {
+      if (!t.date) return
+      const dow = new Date(`${String(t.date).slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', {
+        weekday: 'long',
+      })
+      if (!dowMap[dow]) {
+        dowMap[dow] = { pnl: 0, trades: 0 }
+      }
+      dowMap[dow].pnl += parseFloat(t.net_pnl || 0)
+      dowMap[dow].trades++
+    })
+
+    const bestDow = Object.entries(dowMap).sort(([, a], [, b]) => b.pnl - a.pnl)[0]
+
+    console.log('Filtered trades:', filtered.length)
+
+    console.log('Stats calculated:', {
+      totalTrades: filtered.length,
+      wins: wins.length,
+      losses: losses.length,
+      totalPnl,
+      winRate: winRateStr,
+      profitFactor: profitFactorNum === Infinity ? '∞' : profitFactorNum.toFixed(2),
+      bestSymbol,
+      bestSession,
+    })
+
+    const sortedTrades = [...filtered].sort((a, b) => {
+      const da = new Date(a.date).getTime()
+      const db = new Date(b.date).getTime()
+      if (Number.isFinite(da) && Number.isFinite(db)) return da - db
+      return String(a.date || '').localeCompare(String(b.date || ''))
+    })
+
+    let cumPnl = 0
+    const equityCurveData = sortedTrades.map(t => {
+      cumPnl += parseFloat(t.net_pnl || 0)
+      return {
+        date: t.date?.slice(0, 10),
+        value: cumPnl,
+        pnl: parseFloat(t.net_pnl || 0),
+      }
+    })
+    console.log('Equity curve data:', equityCurveData)
+
+    const dailyPnlMap = {}
+    sortedTrades.forEach(t => {
+      const date = t.date?.slice(0, 10)
+      if (!date) return
+      if (!dailyPnlMap[date]) {
+        dailyPnlMap[date] = 0
+      }
+      dailyPnlMap[date] += parseFloat(t.net_pnl || 0)
+    })
+
+    const dailyPnlData = Object.entries(dailyPnlMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, pnl]) => ({ date, pnl }))
+    console.log('Daily P&L data:', dailyPnlData)
+
+    const winRateData = {
+      wins: wins.length,
+      losses: losses.length,
+      breakevens: breakevens.length,
+      total: filtered.length,
+      winRate: parseFloat(winRateStr),
+    }
+    console.log('Win rate data:', winRateData)
+
+    const symbolTableData = Object.entries(symbolMap)
+      .map(([symbol, data]) => ({
+        symbol,
+        trades: data.trades,
+        winPct: data.trades > 0 ? ((data.wins / data.trades) * 100).toFixed(1) + '%' : '0.0%',
+        netPnl: data.pnl,
+        avgPnl: data.trades > 0 ? (data.pnl / data.trades).toFixed(2) : '0.00',
+        bestTrade: (() => {
+          const vals = filtered.filter(tr => tr.symbol === symbol).map(tr => parseFloat(tr.net_pnl || 0))
+          return vals.length ? Math.max(...vals) : 0
+        })(),
+        worstTrade: (() => {
+          const vals = filtered.filter(tr => tr.symbol === symbol).map(tr => parseFloat(tr.net_pnl || 0))
+          return vals.length ? Math.min(...vals) : 0
+        })(),
+      }))
+      .sort((a, b) => b.netPnl - a.netPnl)
+    console.log('Symbol table:', symbolTableData)
+
+    const symbolRowsLocal = symbolTableData.map(row => ({
+      symbol: row.symbol,
+      trades: row.trades,
+      wins: symbolMap[row.symbol]?.wins ?? 0,
+      net: row.netPnl,
+      winRate: row.trades ? (symbolMap[row.symbol]?.wins ?? 0) / row.trades : 0,
+      avg: row.trades ? row.netPnl / row.trades : 0,
+      best: row.bestTrade,
+      worst: row.worstTrade,
+    }))
+
+    const sessionTableData = SESSIONS.map(session => {
+      const data = sessionMapAgg[session] || { pnl: 0, trades: 0 }
+      const sessionTrades = filtered.filter(t => (t.session || 'Other') === session)
+      const sessionWins = sessionTrades.filter(t => t.status === 'Win')
+      return {
+        session,
+        trades: data.trades,
+        winRate:
+          data.trades > 0 ? ((sessionWins.length / data.trades) * 100).toFixed(1) + '%' : '0.0%',
+        pnl: data.pnl,
+      }
+    })
+    console.log('Session data:', sessionTableData)
+
+    const sessionRowsLocal = sessionTableData.map(row => ({
+      name: row.session,
+      trades: row.trades,
+      winRate: row.trades ? parseFloat(row.winRate) / 100 : 0,
+      net: row.pnl,
+    }))
+    const maxAbs = Math.max(...sessionRowsLocal.map(r => Math.abs(r.net)), 1)
+    const sessionRowsResolved = sessionRowsLocal.map(r => ({
+      ...r,
+      pct: (Math.abs(r.net) / maxAbs) * 100,
+    }))
+
+    return {
+      overallStats: {
+        totalPnl,
+        totalTrades: filtered.length,
+        averageTradePnl: averageTradePnlNum,
+        expectancy: expectancyNum,
+        profitFactor: profitFactorNum,
+        winRate: winRateRatio,
+        insight: buildInsightOverall({
+          totalPnl,
+          expectancy: expectancyNum,
+          profitFactor: profitFactorNum,
+          winRate: winRateRatio,
+        }),
+      },
+      outcomeStats: {
+        wins: wins.length,
+        losses: losses.length,
+        breakeven: breakevens.length,
+        largestProfit,
+        largestLoss,
+        maxWinStreak: maxConsecWins,
+        maxLossStreak: maxConsecLosses,
+        insight: buildInsightOutcomes({
+          wins: wins.length,
+          losses: losses.length,
+          maxWinStreak: maxConsecWins,
+          maxLossStreak: maxConsecLosses,
+          largestProfit,
+          largestLoss,
+        }),
+      },
+      activityStats: {
+        avgDailyVolume: avgDailyVolumeNum,
+        tradingDays,
+        loggedDays: tradingDays,
+        bestDay: bestDow?.[0] ?? '—',
+        bestSession: bestSession?.[0] ?? '—',
+        bestSymbol: bestSymbol?.[0] ?? '—',
+        insight: buildInsightActivity({
+          tradingDays,
+          loggedDays: tradingDays,
+          bestSession: bestSession?.[0] ?? '—',
+          bestSymbol: bestSymbol?.[0] ?? '—',
+        }),
+      },
+      symbolRows: symbolRowsLocal,
+      sessionRows: sessionRowsResolved,
+    }
   }, [filteredTrades])
 
   // PRO: R-Multiple distribution
@@ -1021,8 +1156,11 @@ export default function AnalyticsPage() {
         <div style={{ flex: '0 1 320px', position: 'relative' }}>
           <span style={{ position: 'absolute', left: '12px', top: '9px', color: 'var(--text3)', fontSize: '14px' }}>📅</span>
           <select
+            id="analytics-date-range"
+            name="analytics-date-range"
             value={selectedRange}
             onChange={e => setSelectedRange(e.target.value)}
+            autoComplete="off"
             style={{
               width: '100%',
               appearance: 'none',
@@ -1046,8 +1184,11 @@ export default function AnalyticsPage() {
         </div>
 
         <select
+          id="analytics-account"
+          name="analytics-account"
           value={selectedAccount}
           onChange={e => setSelectedAccount(e.target.value)}
+          autoComplete="off"
           style={{
             borderRadius: '10px',
             border: '1px solid var(--border)',
@@ -1142,7 +1283,14 @@ export default function AnalyticsPage() {
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '10px' }}>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <select value={leftMetric} onChange={e => setLeftMetric(e.target.value)} style={metricSelectStyle}>
+            <select
+              id="analytics-chart-metric-left"
+              name="analytics-chart-metric-left"
+              value={leftMetric}
+              onChange={e => setLeftMetric(e.target.value)}
+              style={metricSelectStyle}
+              autoComplete="off"
+            >
               {METRICS.map(m => (
                 <option key={m.id} value={m.id}>
                   {m.label}
@@ -1150,7 +1298,14 @@ export default function AnalyticsPage() {
               ))}
             </select>
             {rightMetric ? (
-              <select value={rightMetric} onChange={e => setRightMetric(e.target.value)} style={metricSelectStyle}>
+              <select
+                id="analytics-chart-metric-right"
+                name="analytics-chart-metric-right"
+                value={rightMetric}
+                onChange={e => setRightMetric(e.target.value)}
+                style={metricSelectStyle}
+                autoComplete="off"
+              >
                 {METRICS.map(m => (
                   <option key={m.id} value={m.id}>
                     {m.label}
@@ -1734,7 +1889,14 @@ export default function AnalyticsPage() {
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text3)' }}>Daily discipline score across all trades and criteria</div>
             </div>
-            <select value={effectiveHeatmapYear} onChange={e => setSelectedHeatmapYear(Number(e.target.value))} style={metricSelectStyle}>
+            <select
+              id="analytics-heatmap-year"
+              name="analytics-heatmap-year"
+              value={effectiveHeatmapYear}
+              onChange={e => setSelectedHeatmapYear(Number(e.target.value))}
+              style={metricSelectStyle}
+              autoComplete="off"
+            >
               {availableHeatmapYears.map(year => (
                 <option key={year} value={year}>{year}</option>
               ))}

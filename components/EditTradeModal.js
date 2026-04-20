@@ -408,8 +408,17 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
             <h2 style={sectionTitleStyle}>Setup</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '12px' }}>
               <div>
-                <label style={labelStyle}>Account</label>
-                <select style={inputStyle} value={form.account_id} onChange={e => setForm(f => ({ ...f, account_id: e.target.value }))}>
+                <label style={labelStyle} htmlFor="edit-trade-account">
+                  Account
+                </label>
+                <select
+                  id="edit-trade-account"
+                  name="account_id"
+                  autoComplete="off"
+                  style={inputStyle}
+                  value={form.account_id}
+                  onChange={e => setForm(f => ({ ...f, account_id: e.target.value }))}
+                >
                   {accounts.map(account => (
                     <option key={account.id} value={account.id}>
                       {account.name} ({account.market_type ? account.market_type.charAt(0).toUpperCase() + account.market_type.slice(1) : "Futures"})
@@ -418,8 +427,17 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
                 </select>
               </div>
               <div>
-                <label style={labelStyle}>Playbook</label>
-                <select style={inputStyle} value={form.strategy_id} onChange={e => setForm(f => ({ ...f, strategy_id: e.target.value }))}>
+                <label style={labelStyle} htmlFor="edit-trade-strategy">
+                  Playbook
+                </label>
+                <select
+                  id="edit-trade-strategy"
+                  name="strategy_id"
+                  autoComplete="off"
+                  style={inputStyle}
+                  value={form.strategy_id}
+                  onChange={e => setForm(f => ({ ...f, strategy_id: e.target.value }))}
+                >
                   <option value="">No play selected</option>
                   {strategies.map(strategy => (
                     <option key={strategy.id} value={strategy.id}>
@@ -430,14 +448,31 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
               </div>
 
               <div>
-                <label style={labelStyle}>Date</label>
-                <input type="date" style={inputStyle} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} required />
+                <label style={labelStyle} htmlFor="edit-trade-date">
+                  Date
+                </label>
+                <input
+                  id="edit-trade-date"
+                  name="trade-date"
+                  type="date"
+                  autoComplete="off"
+                  style={inputStyle}
+                  value={form.date}
+                  onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                  required
+                />
               </div>
 
               <div>
-                <label style={labelStyle}>Symbol</label>
+                <label style={labelStyle} htmlFor="edit-trade-symbol">
+                  Symbol
+                </label>
                 {customSymbol || symbolOptions.length === 0 ? (
                   <input
+                    id="edit-trade-symbol"
+                    name="symbol"
+                    type="text"
+                    autoComplete="off"
                     style={inputStyle}
                     value={form.symbol}
                     onChange={e => setForm(f => ({ ...f, symbol: e.target.value.toUpperCase() }))}
@@ -446,6 +481,9 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
                   />
                 ) : (
                   <select
+                    id="edit-trade-symbol"
+                    name="symbol"
+                    autoComplete="off"
                     style={inputStyle}
                     value={form.symbol}
                     onChange={e => {
@@ -489,8 +527,17 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
               </div>
 
               <div>
-                <label style={labelStyle}>Session</label>
-                <select style={inputStyle} value={form.session} onChange={e => setForm(f => ({ ...f, session: e.target.value }))}>
+                <label style={labelStyle} htmlFor="edit-trade-session">
+                  Session
+                </label>
+                <select
+                  id="edit-trade-session"
+                  name="session"
+                  autoComplete="off"
+                  style={inputStyle}
+                  value={form.session}
+                  onChange={e => setForm(f => ({ ...f, session: e.target.value }))}
+                >
                   {SESSION_OPTIONS.map(session => (
                     <option key={session} value={session}>
                       {session}
@@ -500,16 +547,34 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
               </div>
 
               <div>
-                <label style={labelStyle}>Direction</label>
-                <select style={inputStyle} value={form.direction} onChange={e => setForm(f => ({ ...f, direction: e.target.value }))}>
+                <label style={labelStyle} htmlFor="edit-trade-direction">
+                  Direction
+                </label>
+                <select
+                  id="edit-trade-direction"
+                  name="direction"
+                  autoComplete="off"
+                  style={inputStyle}
+                  value={form.direction}
+                  onChange={e => setForm(f => ({ ...f, direction: e.target.value }))}
+                >
                   <option value="long">Long</option>
                   <option value="short">Short</option>
                 </select>
               </div>
 
               <div>
-                <label style={labelStyle}>Status</label>
-                <select style={inputStyle} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+                <label style={labelStyle} htmlFor="edit-trade-status">
+                  Status
+                </label>
+                <select
+                  id="edit-trade-status"
+                  name="status"
+                  autoComplete="off"
+                  style={inputStyle}
+                  value={form.status}
+                  onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
+                >
                   <option value="Win">Win</option>
                   <option value="Loss">Loss</option>
                   <option value="Breakeven">Breakeven</option>
@@ -522,28 +587,92 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
             <h2 style={sectionTitleStyle}>Position</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '12px' }}>
               <div>
-                <label style={labelStyle}>{contractsLabel}</label>
-                <input type="number" step="any" style={inputStyle} value={form.contracts} onChange={e => setForm(f => ({ ...f, contracts: e.target.value }))} />
+                <label style={labelStyle} htmlFor="edit-trade-contracts">
+                  {contractsLabel}
+                </label>
+                <input
+                  id="edit-trade-contracts"
+                  name="contracts"
+                  type="number"
+                  autoComplete="off"
+                  step="any"
+                  style={inputStyle}
+                  value={form.contracts}
+                  onChange={e => setForm(f => ({ ...f, contracts: e.target.value }))}
+                />
               </div>
               <div>
-                <label style={labelStyle}>{pointsLabel}</label>
-                <input type="number" step="any" style={inputStyle} value={form.points} onChange={e => setForm(f => ({ ...f, points: e.target.value }))} />
+                <label style={labelStyle} htmlFor="edit-trade-points">
+                  {pointsLabel}
+                </label>
+                <input
+                  id="edit-trade-points"
+                  name="points"
+                  type="number"
+                  autoComplete="off"
+                  step="any"
+                  style={inputStyle}
+                  value={form.points}
+                  onChange={e => setForm(f => ({ ...f, points: e.target.value }))}
+                />
               </div>
               <div>
-                <label style={labelStyle}>Entry price</label>
-                <input type="number" step="any" style={inputStyle} value={form.entry_price} onChange={e => setForm(f => ({ ...f, entry_price: e.target.value }))} />
+                <label style={labelStyle} htmlFor="edit-trade-entry-price">
+                  Entry price
+                </label>
+                <input
+                  id="edit-trade-entry-price"
+                  name="entry-price"
+                  type="number"
+                  autoComplete="off"
+                  step="any"
+                  style={inputStyle}
+                  value={form.entry_price}
+                  onChange={e => setForm(f => ({ ...f, entry_price: e.target.value }))}
+                />
               </div>
               <div>
-                <label style={labelStyle}>Exit price</label>
-                <input type="number" step="any" style={inputStyle} value={form.exit_price} onChange={e => setForm(f => ({ ...f, exit_price: e.target.value }))} />
+                <label style={labelStyle} htmlFor="edit-trade-exit-price">
+                  Exit price
+                </label>
+                <input
+                  id="edit-trade-exit-price"
+                  name="exit-price"
+                  type="number"
+                  autoComplete="off"
+                  step="any"
+                  style={inputStyle}
+                  value={form.exit_price}
+                  onChange={e => setForm(f => ({ ...f, exit_price: e.target.value }))}
+                />
               </div>
               <div>
-                <label style={labelStyle}>Entry time</label>
-                <input type="time" style={inputStyle} value={form.entry_time} onChange={e => setForm(f => ({ ...f, entry_time: e.target.value }))} />
+                <label style={labelStyle} htmlFor="edit-trade-entry-time">
+                  Entry time
+                </label>
+                <input
+                  id="edit-trade-entry-time"
+                  name="entry-time"
+                  type="time"
+                  autoComplete="off"
+                  style={inputStyle}
+                  value={form.entry_time}
+                  onChange={e => setForm(f => ({ ...f, entry_time: e.target.value }))}
+                />
               </div>
               <div>
-                <label style={labelStyle}>Exit time</label>
-                <input type="time" style={inputStyle} value={form.exit_time} onChange={e => setForm(f => ({ ...f, exit_time: e.target.value }))} />
+                <label style={labelStyle} htmlFor="edit-trade-exit-time">
+                  Exit time
+                </label>
+                <input
+                  id="edit-trade-exit-time"
+                  name="exit-time"
+                  type="time"
+                  autoComplete="off"
+                  style={inputStyle}
+                  value={form.exit_time}
+                  onChange={e => setForm(f => ({ ...f, exit_time: e.target.value }))}
+                />
               </div>
             </div>
           </section>
@@ -552,12 +681,34 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
             <h2 style={sectionTitleStyle}>P&L</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: '12px' }}>
               <div>
-                <label style={labelStyle}>Gross P&L</label>
-                <input type="number" step="any" style={inputStyle} value={form.gross_pnl} onChange={e => setForm(f => ({ ...f, gross_pnl: e.target.value }))} />
+                <label style={labelStyle} htmlFor="edit-trade-gross-pnl">
+                  Gross P&L
+                </label>
+                <input
+                  id="edit-trade-gross-pnl"
+                  name="gross-pnl"
+                  type="number"
+                  autoComplete="off"
+                  step="any"
+                  style={inputStyle}
+                  value={form.gross_pnl}
+                  onChange={e => setForm(f => ({ ...f, gross_pnl: e.target.value }))}
+                />
               </div>
               <div>
-                <label style={labelStyle}>Fees</label>
-                <input type="number" step="any" style={inputStyle} value={form.fees} onChange={e => setForm(f => ({ ...f, fees: e.target.value }))} />
+                <label style={labelStyle} htmlFor="edit-trade-fees">
+                  Fees
+                </label>
+                <input
+                  id="edit-trade-fees"
+                  name="fees"
+                  type="number"
+                  autoComplete="off"
+                  step="any"
+                  style={inputStyle}
+                  value={form.fees}
+                  onChange={e => setForm(f => ({ ...f, fees: e.target.value }))}
+                />
               </div>
               <div>
                 <span style={labelStyle}>Net P&L (auto)</span>
@@ -586,19 +737,46 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
             <h2 style={sectionTitleStyle}>Risk</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: '12px' }}>
               <div>
-                <label style={labelStyle}>Profit target</label>
-                <input type="number" step="any" style={inputStyle} value={form.profit_target} onChange={e => setForm(f => ({ ...f, profit_target: e.target.value }))} />
+                <label style={labelStyle} htmlFor="edit-trade-profit-target">
+                  Profit target
+                </label>
+                <input
+                  id="edit-trade-profit-target"
+                  name="profit-target"
+                  type="number"
+                  autoComplete="off"
+                  step="any"
+                  style={inputStyle}
+                  value={form.profit_target}
+                  onChange={e => setForm(f => ({ ...f, profit_target: e.target.value }))}
+                />
               </div>
               <div>
-                <label style={labelStyle}>Stop loss</label>
-                <input type="number" step="any" style={inputStyle} value={form.stop_loss} onChange={e => setForm(f => ({ ...f, stop_loss: e.target.value }))} />
+                <label style={labelStyle} htmlFor="edit-trade-stop-loss">
+                  Stop loss
+                </label>
+                <input
+                  id="edit-trade-stop-loss"
+                  name="stop-loss"
+                  type="number"
+                  autoComplete="off"
+                  step="any"
+                  style={inputStyle}
+                  value={form.stop_loss}
+                  onChange={e => setForm(f => ({ ...f, stop_loss: e.target.value }))}
+                />
               </div>
               <div>
-                <label style={labelStyle}>{tradeRiskLabel}</label>
+                <label style={labelStyle} htmlFor="edit-trade-risk">
+                  {tradeRiskLabel}
+                </label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ fontFamily: 'monospace', color: 'var(--text2)', fontSize: '13px' }}>$</span>
                   <input
+                    id="edit-trade-risk"
+                    name="trade-risk"
                     type="number"
+                    autoComplete="off"
                     step="any"
                     style={{ ...inputStyle, flex: 1 }}
                     value={form.trade_risk}
@@ -607,7 +785,9 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
                 </div>
               </div>
               <div>
-                <label style={labelStyle}>{computedActualRr != null ? 'Actual R (auto)' : 'Actual R:R'}</label>
+                <label style={labelStyle} htmlFor={computedActualRr != null ? undefined : 'edit-trade-actual-rr'}>
+                  {computedActualRr != null ? 'Actual R (auto)' : 'Actual R:R'}
+                </label>
                 {computedActualRr != null ? (
                   <div
                     style={{
@@ -623,7 +803,10 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
                   </div>
                 ) : (
                   <input
+                    id="edit-trade-actual-rr"
+                    name="actual-rr"
                     type="number"
+                    autoComplete="off"
                     step="any"
                     style={inputStyle}
                     value={form.actual_rr}
@@ -668,12 +851,33 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
             <h2 style={sectionTitleStyle}>Review</h2>
             <div style={{ display: 'grid', gap: '12px' }}>
               <div>
-                <label style={labelStyle}>Trade grade</label>
-                <input style={inputStyle} value={form.trade_grade} onChange={e => setForm(f => ({ ...f, trade_grade: e.target.value }))} placeholder="A–F or score" />
+                <label style={labelStyle} htmlFor="edit-trade-grade">
+                  Trade grade
+                </label>
+                <input
+                  id="edit-trade-grade"
+                  name="trade-grade"
+                  type="text"
+                  autoComplete="off"
+                  style={inputStyle}
+                  value={form.trade_grade}
+                  onChange={e => setForm(f => ({ ...f, trade_grade: e.target.value }))}
+                  placeholder="A–F or score"
+                />
               </div>
               <div>
-                <label style={labelStyle}>Notes</label>
-                <textarea style={{ ...inputStyle, resize: 'vertical', minHeight: '88px' }} rows={3} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+                <label style={labelStyle} htmlFor="edit-trade-notes">
+                  Notes
+                </label>
+                <textarea
+                  id="edit-trade-notes"
+                  name="notes"
+                  autoComplete="off"
+                  style={{ ...inputStyle, resize: 'vertical', minHeight: '88px' }}
+                  rows={3}
+                  value={form.notes}
+                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                />
               </div>
               <div>
                 <label style={labelStyle}>Rules you followed</label>
@@ -701,7 +905,10 @@ export default function EditTradeModal({ trade, onClose, onSaved }) {
                                     style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', fontFamily: 'monospace', fontSize: '13px' }}
                                   >
                                     <input
+                                      id={`edit-trade-rule-${key}`}
+                                      name={`edit-trade-rule-${key}`}
                                       type="checkbox"
+                                      autoComplete="off"
                                       checked={checked}
                                       onChange={e => setRulesFollowed(prev => ({ ...prev, [key]: e.target.checked }))}
                                       style={{ accentColor: 'var(--accent)', width: '16px', height: '16px' }}

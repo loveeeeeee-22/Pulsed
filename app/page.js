@@ -867,8 +867,11 @@ export default function Dashboard() {
             </button>
           ))}
           <select
+            id="dashboard-account"
+            name="dashboard-account"
             value={selectedAccount}
             onChange={(e) => setSelectedAccount(e.target.value)}
+            autoComplete="off"
             style={{
               marginLeft: '6px',
               maxWidth: '160px',
@@ -890,8 +893,11 @@ export default function Dashboard() {
             ))}
           </select>
           <select
+            id="dashboard-strategy"
+            name="dashboard-strategy"
             value={strategyFilter}
             onChange={(e) => setStrategyFilter(e.target.value)}
+            autoComplete="off"
             style={{
               maxWidth: '150px',
               background: 'var(--bg3)',

@@ -8,7 +8,7 @@ import { isStrategiesUserIdMissingError } from "@/lib/getStrategiesForUser";
 
 const ACCENT = "#7C3AED";
 
-function RuleGroupCard({ title, subtitle, rules, onAdd, onChange, onRemove, placeholderBase }) {
+function RuleGroupCard({ title, subtitle, rules, onAdd, onChange, onRemove, placeholderBase, groupKey }) {
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: "12px", background: "var(--bg3)", padding: "12px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
@@ -32,6 +32,10 @@ function RuleGroupCard({ title, subtitle, rules, onAdd, onChange, onRemove, plac
               {idx + 1}.
             </div>
             <input
+              id={`playbook-new-rule-${groupKey}-${idx}`}
+              name={`playbook-rule-${groupKey}`}
+              type="text"
+              autoComplete="off"
               value={rule}
               onChange={(e) => onChange(idx, e.target.value)}
               placeholder={`${placeholderBase} ${idx + 1}`}
@@ -196,10 +200,17 @@ export default function NewPlaybookPage() {
 
           <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px" }}>
             <div>
-              <label style={{ display: "block", marginBottom: "6px", fontSize: "11px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text3)" }}>
+              <label
+                htmlFor="playbook-new-name"
+                style={{ display: "block", marginBottom: "6px", fontSize: "11px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text3)" }}
+              >
                 Name
               </label>
               <input
+                id="playbook-new-name"
+                name="playbook-name"
+                type="text"
+                autoComplete="off"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Morning Trap Reversal"
@@ -208,11 +219,17 @@ export default function NewPlaybookPage() {
             </div>
 
             <div>
-              <label style={{ display: "block", marginBottom: "6px", fontSize: "11px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text3)" }}>
+              <label
+                htmlFor="playbook-new-description"
+                style={{ display: "block", marginBottom: "6px", fontSize: "11px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text3)" }}
+              >
                 Description
               </label>
               <textarea
+                id="playbook-new-description"
+                name="playbook-description"
                 rows={3}
+                autoComplete="off"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="When and why this play is taken..."
@@ -233,6 +250,7 @@ export default function NewPlaybookPage() {
                 <RuleGroupCard
                   title="Entry criteria"
                   subtitle="Conditions that must be true before entering"
+                  groupKey="entry"
                   rules={entryRules}
                   onAdd={() => addRule("entry")}
                   onChange={(idx, value) => updateRule("entry", idx, value)}
@@ -242,6 +260,7 @@ export default function NewPlaybookPage() {
                 <RuleGroupCard
                   title="Exit criteria"
                   subtitle="Conditions for scale-out, target, or full exit"
+                  groupKey="exit"
                   rules={exitRules}
                   onAdd={() => addRule("exit")}
                   onChange={(idx, value) => updateRule("exit", idx, value)}
@@ -251,6 +270,7 @@ export default function NewPlaybookPage() {
                 <RuleGroupCard
                   title="Market conditions"
                   subtitle="Sessions, volatility, news — context for taking the trade"
+                  groupKey="market"
                   rules={marketRules}
                   onAdd={() => addRule("market")}
                   onChange={(idx, value) => updateRule("market", idx, value)}
@@ -260,6 +280,7 @@ export default function NewPlaybookPage() {
                 <RuleGroupCard
                   title="Risk management"
                   subtitle="Position size, max loss, daily limits"
+                  groupKey="risk"
                   rules={riskRules}
                   onAdd={() => addRule("risk")}
                   onChange={(idx, value) => updateRule("risk", idx, value)}

@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabase";
 
 const ACCENT = "#7C3AED";
 
-function RuleGroupCard({ title, subtitle, rules, onAdd, onChange, onRemove, placeholderBase }) {
+function RuleGroupCard({ title, subtitle, rules, onAdd, onChange, onRemove, placeholderBase, groupKey }) {
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: "12px", background: "var(--bg3)", padding: "12px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
@@ -30,6 +30,10 @@ function RuleGroupCard({ title, subtitle, rules, onAdd, onChange, onRemove, plac
               {idx + 1}.
             </div>
             <input
+              id={`playbook-edit-rule-${groupKey}-${idx}`}
+              name={`playbook-rule-${groupKey}`}
+              type="text"
+              autoComplete="off"
               value={rule}
               onChange={(e) => onChange(idx, e.target.value)}
               placeholder={`${placeholderBase} ${idx + 1}`}
@@ -200,6 +204,7 @@ export default function EditPlayRulesPage() {
                   <RuleGroupCard
                     title="Entry criteria"
                     subtitle="What must be true before entering"
+                    groupKey="entry"
                     rules={entryRules}
                     onAdd={() => addRule("entry")}
                     onChange={(idx, value) => updateRule("entry", idx, value)}
@@ -209,6 +214,7 @@ export default function EditPlayRulesPage() {
                   <RuleGroupCard
                     title="Exit criteria"
                     subtitle="How and when this setup is managed or closed"
+                    groupKey="exit"
                     rules={exitRules}
                     onAdd={() => addRule("exit")}
                     onChange={(idx, value) => updateRule("exit", idx, value)}
@@ -218,6 +224,7 @@ export default function EditPlayRulesPage() {
                   <RuleGroupCard
                     title="Market conditions"
                     subtitle="Sessions, volatility, context"
+                    groupKey="market"
                     rules={marketRules}
                     onAdd={() => addRule("market")}
                     onChange={(idx, value) => updateRule("market", idx, value)}
@@ -227,6 +234,7 @@ export default function EditPlayRulesPage() {
                   <RuleGroupCard
                     title="Risk management"
                     subtitle="Size, max loss, limits"
+                    groupKey="risk"
                     rules={riskRules}
                     onAdd={() => addRule("risk")}
                     onChange={(idx, value) => updateRule("risk", idx, value)}

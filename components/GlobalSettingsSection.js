@@ -352,8 +352,17 @@ export default function GlobalSettingsSection() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '14px' }}>
         <div>
-          <label style={labelStyle}>Currency</label>
-          <select style={{ ...inputStyle, cursor: 'pointer' }} value={currencyCode} onChange={e => setCurrencyCode(e.target.value)}>
+          <label style={labelStyle} htmlFor="global-currency">
+            Currency
+          </label>
+          <select
+            id="global-currency"
+            name="currency"
+            autoComplete="off"
+            style={{ ...inputStyle, cursor: 'pointer' }}
+            value={currencyCode}
+            onChange={e => setCurrencyCode(e.target.value)}
+          >
             <option value="__auto__">
               Auto (from profile: {countryCode ? `${countryCode} -> ${resolveCurrencyFromCountry(countryCode)}` : 'USD'})
             </option>
@@ -369,8 +378,17 @@ export default function GlobalSettingsSection() {
         </div>
 
         <div>
-          <label style={labelStyle}>Time zone</label>
-          <select style={{ ...inputStyle, cursor: 'pointer' }} value={timeZone} onChange={e => setTimeZone(e.target.value)}>
+          <label style={labelStyle} htmlFor="global-timezone">
+            Time zone
+          </label>
+          <select
+            id="global-timezone"
+            name="timezone"
+            autoComplete="off"
+            style={{ ...inputStyle, cursor: 'pointer' }}
+            value={timeZone}
+            onChange={e => setTimeZone(e.target.value)}
+          >
             <option value="">Select time zone…</option>
             {timeZoneOptions.map(opt => (
               <option key={opt.value} value={opt.value}>

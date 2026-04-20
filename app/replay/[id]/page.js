@@ -1290,9 +1290,17 @@ export default function TradeReplayPage() {
                       ['MA 20', showMa20, () => setShowMa20(v => !v)],
                       ['MA 50', showMa50, () => setShowMa50(v => !v)],
                       ['EMA 9', showEma9, () => setShowEma9(v => !v)],
-                    ].map(([label, on, toggle]) => (
+                    ].map(([label, on, toggle]) => {
+                      const overlayId =
+                        'replay-overlay-' +
+                        String(label)
+                          .toLowerCase()
+                          .replace(/[^a-z0-9]+/g, '-')
+                          .replace(/^-|-$/g, '')
+                      return (
                       <label
                         key={label}
+                        htmlFor={overlayId}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -1305,9 +1313,17 @@ export default function TradeReplayPage() {
                         }}
                       >
                         <span>{label}</span>
-                        <input type="checkbox" checked={on} onChange={toggle} />
+                        <input
+                          id={overlayId}
+                          name={overlayId}
+                          type="checkbox"
+                          checked={on}
+                          onChange={toggle}
+                          autoComplete="off"
+                        />
                       </label>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : null}
               </div>
@@ -1485,11 +1501,14 @@ export default function TradeReplayPage() {
               : '--:--'}
           </span>
           <input
+            id="replay-scrubber"
+            name="replay-scrubber"
             type="range"
             min={0}
             max={candles.length - 1}
             value={currentIndex}
             onChange={handleScrub}
+            autoComplete="off"
             style={{
               flex: 1,
               accentColor: '#3B82F6',

@@ -387,7 +387,16 @@ export default function ProfileSettingsSection() {
               <span style={{ fontSize: '28px', color: 'var(--text3)' }}>?</span>
             )}
           </div>
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
+          <input
+            ref={fileInputRef}
+            id="profile-avatar-file"
+            name="profile-avatar"
+            type="file"
+            accept="image/*"
+            autoComplete="off"
+            onChange={onPickFile}
+            style={{ display: 'none' }}
+          />
           <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
             <button
               type="button"
@@ -442,8 +451,13 @@ export default function ProfileSettingsSection() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '14px' }}>
         <div>
-          <label style={labelStyle}>Username</label>
+          <label style={labelStyle} htmlFor="profile-username">
+            Username
+          </label>
           <input
+            id="profile-username"
+            name="username"
+            type="text"
             style={inputStyle}
             value={username}
             onChange={e => setUsername(e.target.value)}
@@ -452,10 +466,14 @@ export default function ProfileSettingsSection() {
           />
         </div>
         <div>
-          <label style={labelStyle}>Email</label>
+          <label style={labelStyle} htmlFor="profile-email">
+            Email
+          </label>
           <input
-            style={inputStyle}
+            id="profile-email"
+            name="email"
             type="email"
+            style={inputStyle}
             value={contactEmail}
             onChange={e => setContactEmail(e.target.value)}
             autoComplete="email"
@@ -465,28 +483,62 @@ export default function ProfileSettingsSection() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '14px' }}>
         <div>
-          <label style={labelStyle}>First name</label>
-          <input style={inputStyle} value={firstName} onChange={e => setFirstName(e.target.value)} autoComplete="given-name" />
+          <label style={labelStyle} htmlFor="profile-given-name">
+            First name
+          </label>
+          <input
+            id="profile-given-name"
+            name="given-name"
+            type="text"
+            style={inputStyle}
+            value={firstName}
+            onChange={e => setFirstName(e.target.value)}
+            autoComplete="given-name"
+          />
         </div>
         <div>
-          <label style={labelStyle}>Last name</label>
-          <input style={inputStyle} value={lastName} onChange={e => setLastName(e.target.value)} autoComplete="family-name" />
+          <label style={labelStyle} htmlFor="profile-family-name">
+            Last name
+          </label>
+          <input
+            id="profile-family-name"
+            name="family-name"
+            type="text"
+            style={inputStyle}
+            value={lastName}
+            onChange={e => setLastName(e.target.value)}
+            autoComplete="family-name"
+          />
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '14px' }}>
         <div>
-          <label style={labelStyle}>Date of birth</label>
+          <label style={labelStyle} htmlFor="profile-birthdate">
+            Date of birth
+          </label>
           <input
+            id="profile-birthdate"
+            name="bday"
             style={inputStyle}
             type="date"
+            autoComplete="bday"
             value={dateOfBirth}
             onChange={e => setDateOfBirth(e.target.value)}
           />
         </div>
         <div>
-          <label style={labelStyle}>Gender</label>
-          <select style={{ ...inputStyle, cursor: 'pointer' }} value={gender} onChange={e => setGender(e.target.value)}>
+          <label style={labelStyle} htmlFor="profile-gender">
+            Gender
+          </label>
+          <select
+            id="profile-gender"
+            name="gender"
+            autoComplete="sex"
+            style={{ ...inputStyle, cursor: 'pointer' }}
+            value={gender}
+            onChange={e => setGender(e.target.value)}
+          >
             {GENDERS.map(g => (
               <option key={g.value || 'empty'} value={g.value}>
                 {g.label}
@@ -498,8 +550,17 @@ export default function ProfileSettingsSection() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '14px' }}>
         <div>
-          <label style={labelStyle}>Country</label>
-          <select style={{ ...inputStyle, cursor: 'pointer' }} value={countryCode} onChange={onCountryChange}>
+          <label style={labelStyle} htmlFor="profile-country">
+            Country
+          </label>
+          <select
+            id="profile-country"
+            name="country"
+            autoComplete="country"
+            style={{ ...inputStyle, cursor: 'pointer' }}
+            value={countryCode}
+            onChange={onCountryChange}
+          >
             <option value="">Select country…</option>
             {countriesSorted.map(c => (
               <option key={c.isoCode} value={c.isoCode}>
@@ -509,8 +570,13 @@ export default function ProfileSettingsSection() {
           </select>
         </div>
         <div ref={cityWrapRef} style={{ position: 'relative' }}>
-          <label style={labelStyle}>City</label>
+          <label style={labelStyle} htmlFor="profile-city-search">
+            City
+          </label>
           <input
+            id="profile-city-search"
+            name="city"
+            type="search"
             style={inputStyle}
             value={cityQuery}
             onChange={e => {
@@ -574,16 +640,46 @@ export default function ProfileSettingsSection() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '14px' }}>
         <div style={{ gridColumn: '1 / -1' }}>
-          <label style={labelStyle}>Street</label>
-          <input style={inputStyle} value={street} onChange={e => setStreet(e.target.value)} autoComplete="street-address" />
+          <label style={labelStyle} htmlFor="profile-street">
+            Street
+          </label>
+          <input
+            id="profile-street"
+            name="street-address"
+            type="text"
+            style={inputStyle}
+            value={street}
+            onChange={e => setStreet(e.target.value)}
+            autoComplete="street-address"
+          />
         </div>
         <div>
-          <label style={labelStyle}>Postal code</label>
-          <input style={inputStyle} value={postalCode} onChange={e => setPostalCode(e.target.value)} autoComplete="postal-code" />
+          <label style={labelStyle} htmlFor="profile-postal-code">
+            Postal code
+          </label>
+          <input
+            id="profile-postal-code"
+            name="postal-code"
+            type="text"
+            style={inputStyle}
+            value={postalCode}
+            onChange={e => setPostalCode(e.target.value)}
+            autoComplete="postal-code"
+          />
         </div>
         <div>
-          <label style={labelStyle}>Phone number</label>
-          <input style={inputStyle} type="tel" value={phone} onChange={e => setPhone(e.target.value)} autoComplete="tel" />
+          <label style={labelStyle} htmlFor="profile-phone">
+            Phone number
+          </label>
+          <input
+            id="profile-phone"
+            name="tel"
+            style={inputStyle}
+            type="tel"
+            value={phone}
+            onChange={e => setPhone(e.target.value)}
+            autoComplete="tel"
+          />
         </div>
       </div>
 

@@ -134,8 +134,13 @@ function TradeLogContent() {
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
-            type="text" placeholder="Search symbol..." value={search}
+            id="search"
+            name="search"
+            type="search"
+            placeholder="Search symbol..."
+            value={search}
             onChange={e => setSearch(e.target.value)}
+            autoComplete="off"
             style={{ background: 'var(--bg3)', border: '1px solid var(--border-md)', borderRadius: '7px', color: 'var(--text)', fontFamily: 'monospace', fontSize: '12px', padding: '6px 12px', outline: 'none', width: '160px' }}
           />
           <div style={{ display: 'flex', background: 'var(--bg3)', borderRadius: '6px', border: '1px solid var(--border)', overflow: 'hidden' }}>
@@ -146,8 +151,14 @@ function TradeLogContent() {
               </button>
             ))}
           </div>
-          <select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)}
-            style={{ background: 'var(--bg3)', border: '1px solid var(--border-md)', borderRadius: '7px', color: 'var(--text)', fontFamily: 'monospace', fontSize: '11px', padding: '5px 12px', outline: 'none', cursor: 'pointer' }}>
+          <select
+            id="trade-log-account"
+            name="trade-log-account"
+            value={selectedAccount}
+            onChange={e => setSelectedAccount(e.target.value)}
+            autoComplete="off"
+            style={{ background: 'var(--bg3)', border: '1px solid var(--border-md)', borderRadius: '7px', color: 'var(--text)', fontFamily: 'monospace', fontSize: '11px', padding: '5px 12px', outline: 'none', cursor: 'pointer' }}
+          >
             <option value="all">All Accounts</option>
             {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>

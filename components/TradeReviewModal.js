@@ -825,6 +825,9 @@ export default function TradeReviewModal({
                       Playbook
                     </div>
                     <select
+                      id="review-trade-playbook"
+                      name="strategy_id"
+                      autoComplete="off"
                       value={selectedPlaybookId || ''}
                       onChange={e => setSelectedPlaybookId(e.target.value)}
                       style={{
@@ -975,7 +978,10 @@ export default function TradeReviewModal({
                     </div>
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                       <input
+                        id="review-confluence-input"
+                        name="confluence"
                         type="text"
+                        autoComplete="off"
                         value={confluenceInput}
                         onChange={e => setConfluenceInput(e.target.value)}
                         onKeyDown={e => {
@@ -1053,7 +1059,14 @@ export default function TradeReviewModal({
                           <div style={{ display: 'grid', gap: '6px', maxHeight: '180px', overflowY: 'auto' }}>
                             {playbooks.map(pb => (
                               <label key={pb.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text)' }}>
-                                <input type="radio" name="playbook-link-modal" checked={selectedPlaybookId === pb.id} onChange={() => setSelectedPlaybookId(pb.id)} />
+                                <input
+                                  id={`review-playbook-radio-${pb.id}`}
+                                  type="radio"
+                                  name="playbook-link-modal"
+                                  autoComplete="off"
+                                  checked={selectedPlaybookId === pb.id}
+                                  onChange={() => setSelectedPlaybookId(pb.id)}
+                                />
                                 {pb.name}
                               </label>
                             ))}
@@ -1123,7 +1136,10 @@ export default function TradeReviewModal({
                                 return (
                                   <label key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', fontSize: '12px', color: 'var(--text2)', cursor: 'pointer' }}>
                                     <input
+                                      id={`review-rule-check-${key}`}
+                                      name={`review-rule-check-${key}`}
                                       type="checkbox"
+                                      autoComplete="off"
                                       checked={ruleChecks[key] !== false}
                                       onChange={e => setRuleChecks(prev => ({ ...prev, [key]: e.target.checked }))}
                                       style={{ marginTop: '2px', accentColor: '#3B82F6', width: '16px', height: '16px', flexShrink: 0 }}

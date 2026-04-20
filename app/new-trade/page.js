@@ -539,11 +539,13 @@ export default function NewTradePage() {
             </h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "12px" }}>
               <div>
-                <label style={labelStyle} htmlFor="account_id">
+                <label style={labelStyle} htmlFor="trade-account">
                   Account
                 </label>
                 <select
-                  id="account_id"
+                  id="trade-account"
+                  name="account_id"
+                  autoComplete="off"
                   style={inputStyle}
                   value={form.account_id}
                   onChange={(e) => updateField("account_id", e.target.value)}
@@ -557,11 +559,13 @@ export default function NewTradePage() {
                 </select>
               </div>
               <div>
-                <label style={labelStyle} htmlFor="strategy_id">
+                <label style={labelStyle} htmlFor="trade-strategy">
                   Playbook
                 </label>
                 <select
-                  id="strategy_id"
+                  id="trade-strategy"
+                  name="strategy_id"
+                  autoComplete="off"
                   style={inputStyle}
                   value={form.strategy_id}
                   onChange={(e) => updateField("strategy_id", e.target.value)}
@@ -575,12 +579,14 @@ export default function NewTradePage() {
                 </select>
               </div>
               <div>
-                <label style={labelStyle} htmlFor="date">
+                <label style={labelStyle} htmlFor="trade-date">
                   Date
                 </label>
                 <input
-                  id="date"
+                  id="trade-date"
+                  name="trade-date"
                   type="date"
+                  autoComplete="off"
                   required
                   style={inputStyle}
                   value={form.date}
@@ -599,6 +605,9 @@ export default function NewTradePage() {
                     return (
                       <input
                         id="symbol"
+                        name="symbol"
+                        type="text"
+                        autoComplete="off"
                         style={inputStyle}
                         value={form.symbol}
                         onChange={(e) => updateField("symbol", e.target.value.toUpperCase())}
@@ -610,6 +619,8 @@ export default function NewTradePage() {
                   return (
                     <select
                       id="symbol"
+                      name="symbol"
+                      autoComplete="off"
                       style={inputStyle}
                       value={form.symbol}
                       onChange={(e) => {
@@ -663,6 +674,8 @@ export default function NewTradePage() {
                 </label>
                 <select
                   id="session"
+                  name="session"
+                  autoComplete="off"
                   style={inputStyle}
                   value={form.session}
                   onChange={(e) => updateField("session", e.target.value)}
@@ -680,6 +693,8 @@ export default function NewTradePage() {
                 </label>
                 <select
                   id="direction"
+                  name="direction"
+                  autoComplete="off"
                   style={inputStyle}
                   value={form.direction}
                   onChange={(e) => updateField("direction", e.target.value)}
@@ -694,6 +709,8 @@ export default function NewTradePage() {
                 </label>
                 <select
                   id="status"
+                  name="status"
+                  autoComplete="off"
                   style={inputStyle}
                   value={form.status}
                   onChange={(e) => updateField("status", e.target.value)}
@@ -717,7 +734,9 @@ export default function NewTradePage() {
                 </label>
                 <input
                   id="contracts"
+                  name="contracts"
                   type="number"
+                  autoComplete="off"
                   step="any"
                   style={inputStyle}
                   value={form.contracts}
@@ -730,7 +749,9 @@ export default function NewTradePage() {
                 </label>
                 <input
                   id="points"
+                  name="points"
                   type="number"
+                  autoComplete="off"
                   step="any"
                   style={inputStyle}
                   value={form.points}
@@ -738,12 +759,14 @@ export default function NewTradePage() {
                 />
               </div>
               <div>
-                <label style={labelStyle} htmlFor="entry_price">
+                <label style={labelStyle} htmlFor="entry-price">
                   Entry price
                 </label>
                 <input
-                  id="entry_price"
+                  id="entry-price"
+                  name="entry-price"
                   type="number"
+                  autoComplete="off"
                   step="any"
                   style={inputStyle}
                   value={form.entry_price}
@@ -751,12 +774,14 @@ export default function NewTradePage() {
                 />
               </div>
               <div>
-                <label style={labelStyle} htmlFor="exit_price">
+                <label style={labelStyle} htmlFor="exit-price">
                   Exit price
                 </label>
                 <input
-                  id="exit_price"
+                  id="exit-price"
+                  name="exit-price"
                   type="number"
+                  autoComplete="off"
                   step="any"
                   style={inputStyle}
                   value={form.exit_price}
@@ -764,24 +789,28 @@ export default function NewTradePage() {
                 />
               </div>
               <div>
-                <label style={labelStyle} htmlFor="entry_time">
+                <label style={labelStyle} htmlFor="entry-time">
                   Entry time
                 </label>
                 <input
-                  id="entry_time"
+                  id="entry-time"
+                  name="entry-time"
                   type="time"
+                  autoComplete="off"
                   style={inputStyle}
                   value={form.entry_time}
                   onChange={(e) => updateField("entry_time", e.target.value)}
                 />
               </div>
               <div>
-                <label style={labelStyle} htmlFor="exit_time">
+                <label style={labelStyle} htmlFor="exit-time">
                   Exit time
                 </label>
                 <input
-                  id="exit_time"
+                  id="exit-time"
+                  name="exit-time"
                   type="time"
+                  autoComplete="off"
                   style={inputStyle}
                   value={form.exit_time}
                   onChange={(e) => updateField("exit_time", e.target.value)}
@@ -796,12 +825,14 @@ export default function NewTradePage() {
             </h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: "12px" }}>
               <div>
-                <label style={labelStyle} htmlFor="gross_pnl">
+                <label style={labelStyle} htmlFor="gross-pnl">
                   Gross P&amp;L
                 </label>
                 <input
-                  id="gross_pnl"
+                  id="gross-pnl"
+                  name="gross-pnl"
                   type="number"
+                  autoComplete="off"
                   step="any"
                   style={inputStyle}
                   value={form.gross_pnl}
@@ -814,7 +845,9 @@ export default function NewTradePage() {
                 </label>
                 <input
                   id="fees"
+                  name="fees"
                   type="number"
+                  autoComplete="off"
                   step="any"
                   style={inputStyle}
                   value={form.fees}
@@ -836,12 +869,14 @@ export default function NewTradePage() {
             </h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "12px" }}>
               <div>
-                <label style={labelStyle} htmlFor="profit_target">
+                <label style={labelStyle} htmlFor="profit-target">
                   Profit target
                 </label>
                 <input
-                  id="profit_target"
+                  id="profit-target"
+                  name="profit-target"
                   type="number"
+                  autoComplete="off"
                   step="any"
                   style={inputStyle}
                   value={form.profit_target}
@@ -849,12 +884,14 @@ export default function NewTradePage() {
                 />
               </div>
               <div>
-                <label style={labelStyle} htmlFor="stop_loss">
+                <label style={labelStyle} htmlFor="stop-loss">
                   Stop loss
                 </label>
                 <input
-                  id="stop_loss"
+                  id="stop-loss"
+                  name="stop-loss"
                   type="number"
+                  autoComplete="off"
                   step="any"
                   style={inputStyle}
                   value={form.stop_loss}
@@ -862,14 +899,16 @@ export default function NewTradePage() {
                 />
               </div>
               <div>
-                <label style={labelStyle} htmlFor="trade_risk">
+                <label style={labelStyle} htmlFor="trade-risk">
                   Trade risk
                 </label>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span style={{ fontFamily: "monospace", color: "var(--text2)", fontSize: "13px" }}>$</span>
                   <input
-                    id="trade_risk"
+                    id="trade-risk"
+                    name="trade-risk"
                     type="number"
+                    autoComplete="off"
                     step="any"
                     style={{ ...inputStyle, flex: 1 }}
                     value={form.trade_risk}
@@ -878,7 +917,7 @@ export default function NewTradePage() {
                 </div>
               </div>
               <div>
-                <label style={labelStyle} htmlFor={computedActualRr != null ? undefined : "actual_rr"}>
+                <label style={labelStyle} htmlFor={computedActualRr != null ? undefined : "actual-rr"}>
                   {computedActualRr != null ? "Actual R (auto)" : "Actual R:R"}
                 </label>
                 {computedActualRr != null ? (
@@ -896,8 +935,10 @@ export default function NewTradePage() {
                   </div>
                 ) : (
                   <input
-                    id="actual_rr"
+                    id="actual-rr"
+                    name="actual-rr"
                     type="number"
+                    autoComplete="off"
                     step="any"
                     style={inputStyle}
                     value={form.actual_rr}
@@ -1112,7 +1153,10 @@ export default function NewTradePage() {
                                       style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer", fontFamily: "monospace", fontSize: "13px" }}
                                     >
                                       <input
+                                        id={`trade-rule-${key}`}
+                                        name={`trade-rule-${key}`}
                                         type="checkbox"
+                                        autoComplete="off"
                                         checked={checked}
                                         onChange={(e) => setRulesFollowed(prev => ({ ...prev, [key]: e.target.checked }))}
                                         style={{ accentColor: "var(--accent)", width: "16px", height: "16px" }}

@@ -534,11 +534,13 @@ export default function AccountsSettingsSection() {
               )}
 
               <div>
-                <label style={labelStyle} htmlFor="acc-name">
+                <label style={labelStyle} htmlFor="account-name">
                   Account name
                 </label>
                 <input
-                  id="acc-name"
+                  id="account-name"
+                  name="account-name"
+                  type="text"
                   style={inputStyle}
                   value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
@@ -651,12 +653,18 @@ export default function AccountsSettingsSection() {
                 </label>
                 <input
                   id="broker-search"
+                  name="search"
+                  type="search"
+                  autoComplete="off"
                   style={{ ...inputStyle, marginBottom: '8px' }}
                   value={brokerSearch}
                   onChange={e => setBrokerSearch(e.target.value)}
                   placeholder="Search broker list..."
                 />
                 <select
+                  id="account-broker"
+                  name="broker"
+                  autoComplete="off"
                   style={{ ...inputStyle, cursor: 'pointer' }}
                   value={form.broker}
                   onChange={e => setForm(f => ({ ...f, broker: e.target.value }))}
@@ -674,6 +682,10 @@ export default function AccountsSettingsSection() {
                 </select>
                 {form.broker === 'Other' ? (
                   <input
+                    id="broker-other"
+                    name="broker-other"
+                    type="text"
+                    autoComplete="off"
                     style={{ ...inputStyle, marginTop: '8px' }}
                     value={form.brokerOther}
                     onChange={e => setForm(f => ({ ...f, brokerOther: e.target.value }))}
@@ -683,20 +695,25 @@ export default function AccountsSettingsSection() {
               </div>
 
               <div>
-                <label style={labelStyle} htmlFor="acc-balance">
+                <label style={labelStyle} htmlFor="starting-balance">
                   Starting Account Balance
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: '8px' }}>
                   <input
-                    id="acc-balance"
+                    id="starting-balance"
+                    name="starting-balance"
                     style={inputStyle}
                     type="text"
                     inputMode="decimal"
+                    autoComplete="off"
                     value={form.balance}
                     onChange={e => setForm(f => ({ ...f, balance: e.target.value }))}
                     placeholder="e.g. 100000"
                   />
                   <select
+                    id="account-currency"
+                    name="currency"
+                    autoComplete="off"
                     value={form.currency}
                     onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
                     style={{ ...inputStyle, cursor: 'pointer' }}

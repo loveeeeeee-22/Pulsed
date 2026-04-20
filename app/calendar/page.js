@@ -136,8 +136,11 @@ export default function CalendarPage() {
           <h1 style={{ fontSize: '24px', fontWeight: '600', margin: 0 }}>Monthly Overview</h1>
         </div>
         <select
+          id="calendar-account"
+          name="calendar-account"
           value={selectedAccount}
           onChange={e => setSelectedAccount(e.target.value)}
+          autoComplete="off"
           style={{ background: '#1C1C1C', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '7px', color: '#F0EEE8', fontFamily: 'monospace', fontSize: '12px', padding: '6px 12px', outline: 'none', cursor: 'pointer' }}
         >
           <option value="all">All Accounts</option>
