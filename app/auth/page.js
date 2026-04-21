@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Country, City } from 'country-state-city'
-import { supabase } from '@/lib/supabase'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { formatAuthSignInError } from '@/lib/formatAuthSignInError'
 
 /** Shown when sign-up targets an email that already has an auth account. */
 const EMAIL_ALREADY_REGISTERED_MSG =
@@ -67,6 +68,15 @@ export default function AuthPage() {
     setLoading(true)
     setMessage({ type: '', text: '' })
 
+    if (!isSupabaseConfigured) {
+      setMessage({
+        type: 'error',
+        text: 'This app is not connected to Supabase. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local, restart the dev server, and try again.',
+      })
+      setLoading(false)
+      return
+    }
+
     if (mode === 'signup') {
       if (password !== confirmPassword) {
         setMessage({ type: 'error', text: 'Passwords do not match.' })
@@ -86,7 +96,7 @@ export default function AuthPage() {
 
       const redirectTo = `${window.location.origin}/auth/confirm`
       const { data: signUpData, error } = await supabase.auth.signUp({
-        email,
+        email: email.trim(),
         password,
         options: {
           emailRedirectTo: redirectTo,
@@ -124,14 +134,18 @@ export default function AuthPage() {
       return
     }
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const cleanEmail = email.trim()
+    const { data: signInData, error } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    })
     if (error) {
-      setMessage({ type: 'error', text: error.message })
+      setMessage({ type: 'error', text: formatAuthSignInError(error) })
       setLoading(false)
       return
     }
 
-    const { data: { session } } = await supabase.auth.getSession()
+    const session = signInData?.session ?? (await supabase.auth.getSession()).data.session
     if (!session?.user) {
       setMessage({
         type: 'error',
@@ -151,6 +165,23 @@ export default function AuthPage() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--page-bg)', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
       <div style={{ width: '100%', maxWidth: '420px', border: '1px solid var(--border)', borderRadius: '14px', background: 'var(--card-bg)', padding: '20px' }}>
+        {!isSupabaseConfigured ? (
+          <div
+            style={{
+              marginBottom: '14px',
+              borderRadius: '8px',
+              border: '1px solid rgba(234,179,8,0.5)',
+              background: 'rgba(234,179,8,0.12)',
+              color: '#fde047',
+              padding: '12px 14px',
+              fontSize: '12px',
+              fontFamily: 'monospace',
+              lineHeight: 1.5,
+            }}
+          >
+            Supabase env vars are missing. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local, then restart <code style={{ color: 'var(--text2)' }}>npm run dev</code>.
+          </div>
+        ) : null}
         <div style={{ marginBottom: '14px' }}>
           <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
             Pulsed

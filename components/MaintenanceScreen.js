@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { formatAuthSignInError } from '@/lib/formatAuthSignInError'
 
 const DEFAULT_MESSAGE =
   'We are performing scheduled maintenance to improve your experience. We will be back shortly.'
@@ -96,7 +97,7 @@ export default function MaintenanceScreen({ message, endsAt }) {
     })
 
     if (error) {
-      setLoginError('Invalid email or password')
+      setLoginError(formatAuthSignInError(error))
       setLoggingIn(false)
       return
     }
@@ -528,16 +529,25 @@ export default function MaintenanceScreen({ message, endsAt }) {
                   border: '1px solid rgba(239,68,68,0.3)',
                   borderRadius: '7px',
                   padding: '10px 14px',
-                  fontSize: '13px',
+                  fontSize: '12px',
                   color: '#EF4444',
                   fontFamily: 'monospace',
                   marginBottom: '14px',
-                  textAlign: 'center',
+                  textAlign: 'left',
+                  lineHeight: 1.5,
                 }}
               >
                 {loginError}
               </div>
             ) : null}
+
+            <p style={{ fontSize: '12px', color: '#55536A', lineHeight: 1.5, marginBottom: '14px', textAlign: 'center' }}>
+              Use the same email and password as the main{' '}
+              <a href="/auth?mode=login" style={{ color: '#7C3AED' }}>
+                Log in
+              </a>{' '}
+              page. If you can sign in there but not here, hard-refresh this page (⌘⇧R).
+            </p>
 
             <button
               type="submit"
