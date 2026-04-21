@@ -107,6 +107,21 @@ function getPeriodKey(type, date = new Date()) {
   return periodKeyFor(type, date)
 }
 
+/**
+ * Older `journal_entries` schemas keep a NOT NULL `date` column. Postgres rejects inserts without it.
+ * Anchor: daily = that day; weekly = Monday (local) of the ISO week; monthly = first of month.
+ */
+function journalEntryDateColumnValue(type, periodDate) {
+  if (type === 'weekly') {
+    return dayKey(startOfWeek(periodDate))
+  }
+  if (type === 'monthly') {
+    const d = new Date(periodDate.getFullYear(), periodDate.getMonth(), 1)
+    return dayKey(d)
+  }
+  return dayKey(startOfDay(periodDate))
+}
+
 function addPeriod(type, date, delta) {
   const next = new Date(date)
   if (type === 'weekly') {
@@ -943,23 +958,25 @@ export default function JournalPage() {
         setSaveStatus('saving')
 
         const nowIso = new Date().toISOString()
+        const legacyDate = journalEntryDateColumnValue(activeType, periodDate)
         let result
 
         if (existing?.id) {
           console.log('Updating existing entry:', existing.id)
           result = await supabase
             .from('journal_entries')
-            .update({ content, updated_at: nowIso })
+            .update({ content, updated_at: nowIso, date: legacyDate })
             .eq('id', existing.id)
             .select('id, journal_type, period_key, content, updated_at')
         } else {
-          console.log('Inserting new entry')
+          console.log('Inserting new entry', { legacyDate })
           result = await supabase
             .from('journal_entries')
             .insert({
               user_id: user.id,
               journal_type: activeType,
               period_key: currentPeriodKey,
+              date: legacyDate,
               content,
               created_at: nowIso,
               updated_at: nowIso,
