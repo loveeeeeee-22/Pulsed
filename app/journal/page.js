@@ -102,6 +102,11 @@ function periodKeyFor(type, date) {
   return dayKey(date)
 }
 
+/** Canonical period key for the journal (local calendar day for daily — matches DB history). */
+function getPeriodKey(type, date = new Date()) {
+  return periodKeyFor(type, date)
+}
+
 function addPeriod(type, date, delta) {
   const next = new Date(date)
   if (type === 'weekly') {
@@ -634,6 +639,7 @@ export default function JournalPage() {
   const [isDirty, setIsDirty] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
+  const [saveStatus, setSaveStatus] = useState('idle')
   const [lastSavedAt, setLastSavedAt] = useState(null)
   const [pendingAction, setPendingAction] = useState(null)
   const [expandedEntryIds, setExpandedEntryIds] = useState({})
@@ -641,6 +647,8 @@ export default function JournalPage() {
   const [refreshTick, setRefreshTick] = useState(0)
   const editorRef = useRef(null)
   const saveFlashTimerRef = useRef(null)
+  const saveInFlightRef = useRef(false)
+  const loadRequestIdRef = useRef(0)
   const baselineHtmlRef = useRef(baselineHtml)
 
   useLayoutEffect(() => {
@@ -682,7 +690,7 @@ export default function JournalPage() {
     [journalType],
   )
 
-  const periodKey = useMemo(() => periodKeyFor(journalType, periodDate), [journalType, periodDate])
+  const periodKey = useMemo(() => getPeriodKey(journalType, periodDate), [journalType, periodDate])
 
   const entriesForType = useMemo(() => {
     return allEntries
@@ -696,12 +704,6 @@ export default function JournalPage() {
         return bUpdated - aUpdated
       })
   }, [allEntries, journalType])
-
-  const currentEntry = useMemo(() => {
-    return allEntries.find(
-      (entry) => entry.journal_type === journalType && entry.period_key === periodKey,
-    )
-  }, [allEntries, journalType, periodKey])
 
   const editorPlainText = useMemo(() => htmlToText(editorHtml), [editorHtml])
   const wordCount = useMemo(() => {
@@ -721,15 +723,18 @@ export default function JournalPage() {
         : { prev: '← Last month', current: 'This month', next: 'Next month →' }
 
   const fetchEntries = useCallback(async (uid) => {
+    console.log('fetchEntries called with uid:', uid)
     if (!uid) {
       setAllEntries([])
       return []
     }
     const { data, error } = await supabase
       .from('journal_entries')
-      .select('*')
+      .select('id, journal_type, period_key, content, created_at, updated_at')
       .eq('user_id', uid)
       .order('created_at', { ascending: false })
+    console.log('Fetched entries:', data?.length)
+    console.log('Fetch entries error:', error)
     if (error) {
       console.error('Failed to fetch journal entries:', error.message)
       return []
@@ -755,7 +760,11 @@ export default function JournalPage() {
       const {
         data: { session },
       } = await supabase.auth.getSession()
-      const uid = session?.user?.id || null
+      let uid = session?.user?.id || null
+      if (!uid) {
+        const { data: authData } = await supabase.auth.getUser()
+        uid = authData?.user?.id || null
+      }
       if (!active) return
       setUserId(uid)
       await fetchEntries(uid)
@@ -768,21 +777,62 @@ export default function JournalPage() {
   }, [fetchEntries])
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- editor state follows loaded entry when !isDirty */
-    if (isDirty) return
-    const nextHtml = currentEntry?.content || ''
-    setEditorHtml(nextHtml)
-    setBaselineHtml(nextHtml)
-    baselineHtmlRef.current = nextHtml
-    setLastSavedAt(currentEntry?.updated_at ? new Date(currentEntry.updated_at) : null)
-    if (editorRef.current && editorRef.current.innerHTML !== nextHtml) {
-      editorRef.current.innerHTML = nextHtml
-    }
-    /* eslint-enable react-hooks/set-state-in-effect */
-    queueMicrotask(() => {
-      hydrateImageWrappers(editorRef.current, syncEditorFromDom)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      const uid = session?.user?.id ?? null
+      setUserId(uid)
+      if (uid) void fetchEntries(uid)
     })
-  }, [currentEntry, periodKey, journalType, isDirty, syncEditorFromDom])
+    return () => subscription.unsubscribe()
+  }, [fetchEntries])
+
+  useEffect(() => {
+    if (isDirty || !userId) return
+    const requestId = ++loadRequestIdRef.current
+    const type = journalType
+    const key = periodKey
+    console.log('Period key generated:', key, 'type:', type)
+
+    ;(async () => {
+      console.log('Loading entry for:', type, key)
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
+        console.log('loadEntry: no user')
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('journal_entries')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('journal_type', type)
+        .eq('period_key', key)
+        .maybeSingle()
+
+      console.log('Loaded entry:', data)
+      console.log('Load error:', error)
+
+      if (requestId !== loadRequestIdRef.current) return
+
+      const editor = editorRef.current
+      const html = data?.content ?? ''
+      if (editor && editor.innerHTML !== html) {
+        editor.innerHTML = html
+      }
+      setEditorHtml(html)
+      setBaselineHtml(html)
+      baselineHtmlRef.current = html
+      setLastSavedAt(data?.updated_at ? new Date(data.updated_at) : null)
+
+      queueMicrotask(() => {
+        if (requestId !== loadRequestIdRef.current) return
+        hydrateImageWrappers(editorRef.current, syncEditorFromDom)
+      })
+    })()
+  }, [journalType, periodKey, isDirty, userId, syncEditorFromDom])
 
   useEffect(() => {
     const interval = setInterval(() => setRefreshTick((value) => value + 1), 30000)
@@ -808,65 +858,137 @@ export default function JournalPage() {
     return () => document.removeEventListener('click', onDocClick)
   }, [])
 
-  const runSave = useCallback(
+  const saveEntry = useCallback(
     async ({ silent = false } = {}) => {
-      if (!userId || isSaving) return { ok: false }
-      const html = getCleanContent(editorRef.current) || editorHtml
-      const existing = allEntries.find(
-        (entry) => entry.journal_type === journalType && entry.period_key === periodKey,
-      )
-      setIsSaving(true)
-      const nowIso = new Date().toISOString()
-      let error = null
+      console.log('=== SAVE ENTRY CALLED ===', { silent })
 
-      if (existing?.id) {
-        const { error: updateError } = await supabase
-          .from('journal_entries')
-          .update({ content: html, updated_at: nowIso })
-          .eq('id', existing.id)
-        error = updateError
-      } else {
-        const { error: insertError } = await supabase.from('journal_entries').insert({
-          user_id: userId,
-          journal_type: journalType,
-          period_key: periodKey,
-          content: html,
-          created_at: nowIso,
-          updated_at: nowIso,
-        })
-        error = insertError
-      }
-
-      if (error) {
-        console.error('Failed to save journal entry:', error.message)
-        setIsSaving(false)
+      if (saveInFlightRef.current) {
+        console.log('SAVE SKIPPED: already in flight')
         return { ok: false }
       }
 
-      await fetchEntries(userId)
-      setBaselineHtml(html)
-      baselineHtmlRef.current = html
-      setEditorHtml(html)
+      const editor = document.getElementById('noteEditor')
+      const content = getCleanContent(editor) || editor?.innerHTML || ''
+
+      console.log('Editor content length:', content.length)
+      console.log('Content preview:', content.slice(0, 100))
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser()
+
+      console.log('Current user:', user?.id)
+      console.log('User error:', userError)
+
+      if (!user) {
+        console.error('NO USER - cannot save')
+        setSaveStatus('error')
+        return { ok: false }
+      }
+
+      if (user.id !== userId) {
+        setUserId(user.id)
+      }
+
+      const activeType = journalType
+      const currentPeriodKey = getPeriodKey(activeType, periodDate)
+      console.log('Journal type:', activeType)
+      console.log('Period key:', currentPeriodKey)
+
+      const { data: existing, error: fetchError } = await supabase
+        .from('journal_entries')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('journal_type', activeType)
+        .eq('period_key', currentPeriodKey)
+        .maybeSingle()
+
+      console.log('Existing entry:', existing)
+      console.log('Fetch error:', fetchError)
+
+      if (fetchError) {
+        console.error('SAVE FAILED (lookup existing):', fetchError)
+        setSaveStatus('error')
+        return { ok: false }
+      }
+
+      saveInFlightRef.current = true
+      setIsSaving(true)
+      setSaveStatus('saving')
+
+      const nowIso = new Date().toISOString()
+      let result
+
+      if (existing?.id) {
+        console.log('Updating existing entry:', existing.id)
+        result = await supabase
+          .from('journal_entries')
+          .update({ content, updated_at: nowIso })
+          .eq('id', existing.id)
+          .select('id, journal_type, period_key, content, updated_at')
+      } else {
+        console.log('Inserting new entry')
+        result = await supabase
+          .from('journal_entries')
+          .insert({
+            user_id: user.id,
+            journal_type: activeType,
+            period_key: currentPeriodKey,
+            content,
+            created_at: nowIso,
+            updated_at: nowIso,
+          })
+          .select('id, journal_type, period_key, content, updated_at')
+      }
+
+      console.log('Save result:', result)
+      console.log('Save error:', result.error)
+      console.log('Save data:', result.data)
+
+      saveInFlightRef.current = false
+      setIsSaving(false)
+
+      if (result.error) {
+        console.error('SAVE FAILED:', result.error)
+        setSaveStatus('error')
+        return { ok: false }
+      }
+
+      console.log('=== SAVE SUCCESS ===')
+      setSaveStatus('saved')
+      setTimeout(() => {
+        setSaveStatus((s) => (s === 'saved' ? 'idle' : s))
+      }, 3000)
+
+      await fetchEntries(user.id)
+
+      setBaselineHtml(content)
+      baselineHtmlRef.current = content
+      setEditorHtml(content)
       setIsDirty(false)
       setLastSavedAt(new Date())
       setSavedFlash(true)
-      setIsSaving(false)
       if (!silent) {
         setPendingAction(null)
       }
       return { ok: true }
     },
-    [allEntries, editorHtml, fetchEntries, isSaving, journalType, periodKey, userId],
+    [fetchEntries, journalType, periodDate, userId],
   )
 
   useEffect(() => {
-    const autosave = setInterval(() => {
-      if (isDirty && userId && !isSaving) {
-        void runSave({ silent: true })
-      }
+    const autoSaveInterval = setInterval(() => {
+      const editor = document.getElementById('noteEditor')
+      const raw = getCleanContent(editor) || editor?.innerHTML || ''
+      const trimmed = raw.replace(/<[^>]+>/g, '').trim()
+      const trivial = !raw || raw === '<br>' || raw.trim() === '' || trimmed === ''
+      if (trivial || !isDirty || !userId || saveInFlightRef.current) return
+      console.log('Auto-saving...')
+      void saveEntry({ silent: true })
     }, 30000)
-    return () => clearInterval(autosave)
-  }, [isDirty, isSaving, runSave, userId])
+    return () => clearInterval(autoSaveInterval)
+  }, [isDirty, journalType, periodKey, saveEntry, userId])
 
   function runAction(action) {
     if (!action) return
@@ -891,7 +1013,7 @@ export default function JournalPage() {
   }
 
   async function onSavePendingAndContinue() {
-    const result = await runSave()
+    const result = await saveEntry()
     if (result.ok) {
       runAction(pendingAction)
     }
@@ -906,6 +1028,7 @@ export default function JournalPage() {
     const html = getCleanContent(editorRef.current) || ''
     setEditorHtml(html)
     setIsDirty(html !== baselineHtml)
+    setSaveStatus((s) => (s === 'error' ? 'idle' : s))
   }
 
   function applyCommand(command, value = null) {
@@ -932,7 +1055,7 @@ export default function JournalPage() {
 
   function handleCurrentPeriod() {
     const now = new Date()
-    if (periodKeyFor(journalType, now) === periodKey) return
+    if (getPeriodKey(journalType, now) === periodKey) return
     queueAction({ kind: 'period', value: now })
   }
 
@@ -1390,22 +1513,46 @@ export default function JournalPage() {
               </div>
               <button
                 type="button"
-                onClick={() => void runSave()}
-                disabled={isSaving}
+                onClick={() => void saveEntry()}
+                disabled={saveStatus === 'saving'}
                 style={{
+                  padding: '8px 20px',
+                  borderRadius: '8px',
+                  background:
+                    saveStatus === 'saved' ? '#22C55E' : saveStatus === 'error' ? '#EF4444' : accent,
+                  color: '#fff',
                   border: 'none',
-                  borderRadius: '9px',
-                  padding: '10px 16px',
-                  background: accent,
-                  color: 'white',
-                  cursor: isSaving ? 'not-allowed' : 'pointer',
-                  fontWeight: 600,
-                  opacity: isSaving ? 0.8 : 1,
+                  cursor: saveStatus === 'saving' ? 'not-allowed' : 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  opacity: saveStatus === 'saving' ? 0.7 : 1,
+                  transition: 'all 0.2s',
+                  minWidth: '100px',
                 }}
               >
-                {isSaving ? 'Saving...' : 'Save Entry'}
+                {saveStatus === 'saving' && 'Saving...'}
+                {saveStatus === 'saved' && '✓ Saved'}
+                {saveStatus === 'error' && '✗ Error'}
+                {saveStatus === 'idle' && 'Save Entry'}
               </button>
             </div>
+
+            {saveStatus === 'error' ? (
+              <div
+                style={{
+                  background: 'rgba(239,68,68,0.1)',
+                  border: '1px solid #EF4444',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  fontSize: '12px',
+                  color: '#EF4444',
+                  marginTop: '8px',
+                  fontFamily: 'monospace',
+                }}
+              >
+                Failed to save. Check your connection and try again.
+              </div>
+            ) : null}
           </div>
         </main>
       </div>
