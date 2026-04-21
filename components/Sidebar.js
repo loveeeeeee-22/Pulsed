@@ -129,6 +129,7 @@ export default function Sidebar({ isExpanded, onToggleExpand }) {
           <Link
             key={link.href}
             href={link.href}
+            prefetch
             title={link.label}
             style={{
               width: isExpanded ? '100%' : '36px',

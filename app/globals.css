@@ -185,6 +185,57 @@ tr:hover td {
   animation: fadeIn 0.2s ease forwards;
 }
 
+/* Route transitions — main content only (template remounts on navigation) */
+@keyframes pj-route-in {
+  from {
+    opacity: 0.94;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pj-page-template {
+  animation: pj-route-in 0.18s ease-out both;
+  min-height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pj-page-template {
+    animation: none;
+  }
+}
+
+/* loading.js skeleton */
+@keyframes pj-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.pj-route-loading-bar {
+  background: linear-gradient(
+    90deg,
+    var(--bg3) 0%,
+    var(--bg4) 42%,
+    var(--bg3) 84%
+  );
+  background-size: 200% 100%;
+  animation: pj-shimmer 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pj-route-loading-bar {
+    animation: none;
+    background: var(--bg3);
+  }
+}
+
 /* Journal editor image styles (#noteEditor) */
 #noteEditor img {
   max-width: 100% !important;

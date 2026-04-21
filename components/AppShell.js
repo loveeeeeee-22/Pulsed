@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import AuthSessionRecovery from '@/components/AuthSessionRecovery'
+import NavigationProgress from '@/components/NavigationProgress'
 
 export default function AppShell({ children }) {
   const pathname = usePathname()
@@ -23,6 +24,7 @@ export default function AppShell({ children }) {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <NavigationProgress />
       <AuthSessionRecovery />
       {!hideSidebar && (
         <Sidebar
