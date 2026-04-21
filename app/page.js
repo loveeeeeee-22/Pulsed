@@ -1528,23 +1528,6 @@ export default function Dashboard() {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end' }}>
                   <button
                     type="button"
-                    onClick={() => setCashModalKind('income')}
-                    style={{
-                      borderRadius: '8px',
-                      border: '1px solid rgba(34,197,94,0.5)',
-                      background: 'rgba(34,197,94,0.12)',
-                      color: '#4ade80',
-                      padding: '8px 14px',
-                      fontSize: '12px',
-                      fontFamily: 'monospace',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Add income
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setCashModalKind('expense')}
                     style={{
                       borderRadius: '8px',
@@ -1558,7 +1541,7 @@ export default function Dashboard() {
                       cursor: 'pointer',
                     }}
                   >
-                    Add expense
+                    Withdraw
                   </button>
                 </div>
               )}
@@ -1634,19 +1617,20 @@ export default function Dashboard() {
             </div>
           ) : (
             <div style={{ padding: '14px', borderRadius: '8px', background: 'var(--bg3)', border: '1px solid var(--border)', fontSize: '12px', fontFamily: 'monospace', color: 'var(--text3)' }}>
-              Add at least two trades or cash movements on this account to render the balance chart.
+              Add at least two trades or withdrawals on this account to render the balance chart.
             </div>
           )}
 
           {selectedAccount !== 'all' && recentCashForAccount.length > 0 ? (
             <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--border)' }}>
               <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '10px' }}>
-                Income & expenses (recent)
+                {'Withdrawals & cash activity (recent)'}
               </div>
               <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {recentCashForAccount.map((row) => {
                   const signed = signedCashDelta(row)
-                  const isInc = row.kind === 'income'
+                  const isWithdraw = row.kind === 'expense'
+                  const typeLabel = isWithdraw ? 'Withdraw' : 'Income'
                   return (
                     <li
                       key={row.id}
@@ -1665,10 +1649,13 @@ export default function Dashboard() {
                       }}
                     >
                       <span style={{ color: 'var(--text2)' }}>
-                        {row.occurred_on} · <span style={{ color: 'var(--text)' }}>{row.category}</span>
+                        {row.occurred_on} ·{' '}
+                        <span style={{ color: isWithdraw ? '#f87171' : '#4ade80', fontWeight: 600 }}>{typeLabel}</span>
+                        {' · '}
+                        <span style={{ color: 'var(--text)' }}>{row.category}</span>
                         {row.notes ? <span style={{ color: 'var(--text3)' }}> — {row.notes}</span> : null}
                       </span>
-                      <span style={{ fontWeight: 700, color: isInc ? '#22C55E' : '#EF4444' }}>
+                      <span style={{ fontWeight: 700, color: isWithdraw ? '#EF4444' : '#22C55E' }}>
                         {signed >= 0 ? '+' : ''}${signed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </li>
@@ -1881,7 +1868,7 @@ export default function Dashboard() {
       <NewTradeToast trade={toastTrade} onClose={dismissToast} />
 
       <AccountCashTransactionModal
-        kind={cashModalKind || 'income'}
+        kind={cashModalKind || 'expense'}
         open={cashModalKind != null}
         onClose={() => setCashModalKind(null)}
         accounts={accounts}
@@ -1889,7 +1876,7 @@ export default function Dashboard() {
         accent={accent}
         onSaved={async (row) => {
           await fetchCashTransactions()
-          const label = row?.kind === 'expense' ? 'Expense' : 'Income'
+          const label = row?.kind === 'expense' ? 'Withdrawal' : 'Income'
           setBriefToast({ message: `${label} saved.`, variant: 'success' })
         }}
       />

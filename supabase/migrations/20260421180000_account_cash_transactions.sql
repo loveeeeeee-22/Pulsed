@@ -1,5 +1,5 @@
--- Income / expense (non-trade) cash movements per account.
--- Balance in the app is computed as accounts.balance + trade P&L + signed cash rows.
+-- Withdrawals and legacy credits (non-trade) cash movements per account.
+-- `kind` expense = money out (profit withdrawal); income = credit in. Balance is accounts.balance + trade P&L + signed cash rows.
 
 create table if not exists public.account_cash_transactions (
   id uuid primary key default gen_random_uuid(),
@@ -22,7 +22,7 @@ create index if not exists account_cash_transactions_account_id_idx
 create index if not exists account_cash_transactions_occurred_on_idx
   on public.account_cash_transactions (occurred_on desc);
 
-comment on table public.account_cash_transactions is 'Non-trade income and expenses affecting account equity.';
+comment on table public.account_cash_transactions is 'Non-trade withdrawals (expense) and credits (income) affecting account equity.';
 
 create or replace function public.set_account_cash_transaction_user_id()
 returns trigger

@@ -48,7 +48,7 @@ function SubmitSpinner() {
 }
 
 /**
- * Add non-trade income or expense. Closes on successful insert; surfaces validation and API errors.
+ * Record withdrawals (kind `expense`) or legacy income credits. Closes on successful insert.
  */
 export default function AccountCashTransactionModal({
   kind,
@@ -68,7 +68,8 @@ export default function AccountCashTransactionModal({
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const title = kind === 'expense' ? 'Add expense' : 'Add income'
+  const isWithdraw = kind === 'expense'
+  const title = isWithdraw ? 'Record withdrawal' : 'Add income'
 
   useEffect(() => {
     if (!open) return
@@ -223,7 +224,13 @@ export default function AccountCashTransactionModal({
           <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {accountOptions.length === 0 ? (
               <p style={{ margin: 0, fontSize: '13px', color: 'var(--text2)', lineHeight: 1.5 }}>
-                Add an account in Settings before recording income or expenses.
+                Add an account in Settings before recording withdrawals.
+              </p>
+            ) : null}
+
+            {accountOptions.length > 0 && isWithdraw ? (
+              <p style={{ margin: 0, fontSize: '12px', color: 'var(--text3)', lineHeight: 1.5 }}>
+                Pulling profits out of this account reduces your displayed balance, equity curve, and account totals the same way across the app.
               </p>
             ) : null}
 
@@ -259,7 +266,7 @@ export default function AccountCashTransactionModal({
 
             <div>
               <label style={labelStyle} htmlFor="cash-tx-amount">
-                Amount
+                {isWithdraw ? 'Withdrawal amount' : 'Amount'}
               </label>
               <input
                 id="cash-tx-amount"
@@ -287,7 +294,7 @@ export default function AccountCashTransactionModal({
                 name="cash-tx-category"
                 type="text"
                 autoComplete="off"
-                placeholder={kind === 'expense' ? 'e.g. Platform fee, data' : 'e.g. Payout, deposit'}
+                placeholder={isWithdraw ? 'e.g. Profit withdrawal, wire to bank' : 'e.g. Payout, deposit'}
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 disabled={submitting}
@@ -399,6 +406,8 @@ export default function AccountCashTransactionModal({
                   <SubmitSpinner />
                   Saving…
                 </>
+              ) : isWithdraw ? (
+                'Save withdrawal'
               ) : (
                 'Save'
               )}
