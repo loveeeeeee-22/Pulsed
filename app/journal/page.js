@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { isSupabaseConfigured, supabase } from '@/lib/supabase'
 
 const JOURNAL_TYPES = [
   {
@@ -213,6 +213,15 @@ function hasMeaningfulHtml(html) {
   const text = htmlToText(html)
   if (text.length > 0) return true
   return /<(img|hr|ul|ol|li|h1|h2|h3|h4|h5|h6|blockquote|table)\b/i.test(html || '')
+}
+
+function formatSupabaseError(err) {
+  if (!err) return 'Unknown error'
+  const msg = typeof err.message === 'string' ? err.message : ''
+  const code = err.code != null ? String(err.code) : ''
+  const details = typeof err.details === 'string' ? err.details : ''
+  const hint = typeof err.hint === 'string' ? err.hint : ''
+  return [msg, code ? `(${code})` : '', details, hint].filter(Boolean).join(' ')
 }
 
 function formatRelativeSaved(lastSavedAt) {
@@ -640,6 +649,7 @@ export default function JournalPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
   const [saveStatus, setSaveStatus] = useState('idle')
+  const [saveErrorMessage, setSaveErrorMessage] = useState(null)
   const [lastSavedAt, setLastSavedAt] = useState(null)
   const [pendingAction, setPendingAction] = useState(null)
   const [expandedEntryIds, setExpandedEntryIds] = useState({})
@@ -744,13 +754,11 @@ export default function JournalPage() {
   }, [])
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- read persisted accent once on mount */
     const raw = typeof window !== 'undefined' ? window.localStorage.getItem('accentColor') : null
     if (raw && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw)) {
       setAccent(raw)
       document.documentElement.style.setProperty('--accent', raw)
     }
-    /* eslint-enable react-hooks/set-state-in-effect */
   }, [])
 
   useEffect(() => {
@@ -867,112 +875,136 @@ export default function JournalPage() {
         return { ok: false }
       }
 
-      const editor = document.getElementById('noteEditor')
-      const content = getCleanContent(editor) || editor?.innerHTML || ''
+      setSaveErrorMessage(null)
 
-      console.log('Editor content length:', content.length)
-      console.log('Content preview:', content.slice(0, 100))
-
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser()
-
-      console.log('Current user:', user?.id)
-      console.log('User error:', userError)
-
-      if (!user) {
-        console.error('NO USER - cannot save')
+      if (!isSupabaseConfigured) {
+        const msg =
+          'Database not connected: set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local (or your host env), then restart the dev server or redeploy.'
+        console.error('SAVE BLOCKED:', msg)
+        setSaveErrorMessage(msg)
         setSaveStatus('error')
         return { ok: false }
       }
 
-      if (user.id !== userId) {
-        setUserId(user.id)
-      }
+      try {
+        const editor = document.getElementById('noteEditor')
+        const content = getCleanContent(editor) || editor?.innerHTML || ''
 
-      const activeType = journalType
-      const currentPeriodKey = getPeriodKey(activeType, periodDate)
-      console.log('Journal type:', activeType)
-      console.log('Period key:', currentPeriodKey)
+        console.log('Editor content length:', content.length)
+        console.log('Content preview:', content.slice(0, 100))
 
-      const { data: existing, error: fetchError } = await supabase
-        .from('journal_entries')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('journal_type', activeType)
-        .eq('period_key', currentPeriodKey)
-        .maybeSingle()
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser()
 
-      console.log('Existing entry:', existing)
-      console.log('Fetch error:', fetchError)
+        console.log('Current user:', user?.id)
+        console.log('User error:', userError)
 
-      if (fetchError) {
-        console.error('SAVE FAILED (lookup existing):', fetchError)
-        setSaveStatus('error')
-        return { ok: false }
-      }
+        if (!user) {
+          console.error('NO USER - cannot save')
+          setSaveErrorMessage(
+            formatSupabaseError(userError) ||
+              'You are not signed in (or the session expired). Open another tab where you are logged in, or sign in again.',
+          )
+          setSaveStatus('error')
+          return { ok: false }
+        }
 
-      saveInFlightRef.current = true
-      setIsSaving(true)
-      setSaveStatus('saving')
+        if (user.id !== userId) {
+          setUserId(user.id)
+        }
 
-      const nowIso = new Date().toISOString()
-      let result
+        const activeType = journalType
+        const currentPeriodKey = getPeriodKey(activeType, periodDate)
+        console.log('Journal type:', activeType)
+        console.log('Period key:', currentPeriodKey)
 
-      if (existing?.id) {
-        console.log('Updating existing entry:', existing.id)
-        result = await supabase
+        const { data: existing, error: fetchError } = await supabase
           .from('journal_entries')
-          .update({ content, updated_at: nowIso })
-          .eq('id', existing.id)
-          .select('id, journal_type, period_key, content, updated_at')
-      } else {
-        console.log('Inserting new entry')
-        result = await supabase
-          .from('journal_entries')
-          .insert({
-            user_id: user.id,
-            journal_type: activeType,
-            period_key: currentPeriodKey,
-            content,
-            created_at: nowIso,
-            updated_at: nowIso,
-          })
-          .select('id, journal_type, period_key, content, updated_at')
-      }
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('journal_type', activeType)
+          .eq('period_key', currentPeriodKey)
+          .maybeSingle()
 
-      console.log('Save result:', result)
-      console.log('Save error:', result.error)
-      console.log('Save data:', result.data)
+        console.log('Existing entry:', existing)
+        console.log('Fetch error:', fetchError)
 
-      saveInFlightRef.current = false
-      setIsSaving(false)
+        if (fetchError) {
+          console.error('SAVE FAILED (lookup existing):', fetchError)
+          setSaveErrorMessage(formatSupabaseError(fetchError))
+          setSaveStatus('error')
+          return { ok: false }
+        }
 
-      if (result.error) {
-        console.error('SAVE FAILED:', result.error)
+        saveInFlightRef.current = true
+        setIsSaving(true)
+        setSaveStatus('saving')
+
+        const nowIso = new Date().toISOString()
+        let result
+
+        if (existing?.id) {
+          console.log('Updating existing entry:', existing.id)
+          result = await supabase
+            .from('journal_entries')
+            .update({ content, updated_at: nowIso })
+            .eq('id', existing.id)
+            .select('id, journal_type, period_key, content, updated_at')
+        } else {
+          console.log('Inserting new entry')
+          result = await supabase
+            .from('journal_entries')
+            .insert({
+              user_id: user.id,
+              journal_type: activeType,
+              period_key: currentPeriodKey,
+              content,
+              created_at: nowIso,
+              updated_at: nowIso,
+            })
+            .select('id, journal_type, period_key, content, updated_at')
+        }
+
+        console.log('Save result:', result)
+        console.log('Save error:', result.error)
+        console.log('Save data:', result.data)
+
+        if (result.error) {
+          console.error('SAVE FAILED:', result.error)
+          setSaveErrorMessage(formatSupabaseError(result.error))
+          setSaveStatus('error')
+          return { ok: false }
+        }
+
+        console.log('=== SAVE SUCCESS ===')
+        setSaveStatus('saved')
+        setTimeout(() => {
+          setSaveStatus((s) => (s === 'saved' ? 'idle' : s))
+        }, 3000)
+
+        await fetchEntries(user.id)
+
+        setBaselineHtml(content)
+        baselineHtmlRef.current = content
+        setEditorHtml(content)
+        setIsDirty(false)
+        setLastSavedAt(new Date())
+        setSavedFlash(true)
+        if (!silent) {
+          setPendingAction(null)
+        }
+        return { ok: true }
+      } catch (err) {
+        console.error('SAVE EXCEPTION:', err)
+        setSaveErrorMessage(err?.message || String(err))
         setSaveStatus('error')
         return { ok: false }
+      } finally {
+        saveInFlightRef.current = false
+        setIsSaving(false)
       }
-
-      console.log('=== SAVE SUCCESS ===')
-      setSaveStatus('saved')
-      setTimeout(() => {
-        setSaveStatus((s) => (s === 'saved' ? 'idle' : s))
-      }, 3000)
-
-      await fetchEntries(user.id)
-
-      setBaselineHtml(content)
-      baselineHtmlRef.current = content
-      setEditorHtml(content)
-      setIsDirty(false)
-      setLastSavedAt(new Date())
-      setSavedFlash(true)
-      if (!silent) {
-        setPendingAction(null)
-      }
-      return { ok: true }
     },
     [fetchEntries, journalType, periodDate, userId],
   )
@@ -1029,6 +1061,7 @@ export default function JournalPage() {
     setEditorHtml(html)
     setIsDirty(html !== baselineHtml)
     setSaveStatus((s) => (s === 'error' ? 'idle' : s))
+    setSaveErrorMessage(null)
   }
 
   function applyCommand(command, value = null) {
@@ -1550,7 +1583,16 @@ export default function JournalPage() {
                   fontFamily: 'monospace',
                 }}
               >
-                Failed to save. Check your connection and try again.
+                <div style={{ fontWeight: 600, marginBottom: '6px' }}>Save failed</div>
+                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {saveErrorMessage ||
+                    'No detail available — open DevTools → Console and look for SAVE FAILED or SAVE EXCEPTION.'}
+                </div>
+                <div style={{ marginTop: '8px', fontSize: '11px', opacity: 0.9, color: 'var(--text2)' }}>
+                  This is usually not your internet. Common causes: not signed in, missing Supabase env vars on
+                  this deployment, row-level security (RLS), or an entry that is too large (e.g. huge pasted
+                  images).
+                </div>
               </div>
             ) : null}
           </div>
