@@ -667,13 +667,15 @@ export default function JournalPage() {
   const [saveErrorMessage, setSaveErrorMessage] = useState(null)
   const [lastSavedAt, setLastSavedAt] = useState(null)
   const [pendingAction, setPendingAction] = useState(null)
-  const [expandedEntryIds, setExpandedEntryIds] = useState({})
   const [hoveredEntryId, setHoveredEntryId] = useState(null)
+  const [editorContentLoading, setEditorContentLoading] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
   const editorRef = useRef(null)
+  const mainColumnRef = useRef(null)
   const saveFlashTimerRef = useRef(null)
   const saveInFlightRef = useRef(false)
   const loadRequestIdRef = useRef(0)
+  const navTargetKeyRef = useRef(null)
   const baselineHtmlRef = useRef(baselineHtml)
 
   useLayoutEffect(() => {
@@ -810,6 +812,27 @@ export default function JournalPage() {
     return () => subscription.unsubscribe()
   }, [fetchEntries])
 
+  useLayoutEffect(() => {
+    if (!userId) {
+      navTargetKeyRef.current = null
+      return
+    }
+    if (isDirty) return
+    const navKey = `${journalType}:${periodKey}`
+    if (navTargetKeyRef.current === navKey) return
+    const isFirstPaint = navTargetKeyRef.current === null
+    navTargetKeyRef.current = navKey
+    if (isFirstPaint) return
+
+    const editor = editorRef.current
+    if (editor) editor.innerHTML = ''
+    setEditorHtml('')
+    setBaselineHtml('')
+    baselineHtmlRef.current = ''
+    setLastSavedAt(null)
+    setEditorContentLoading(true)
+  }, [journalType, periodKey, isDirty, userId])
+
   useEffect(() => {
     if (isDirty || !userId) return
     const requestId = ++loadRequestIdRef.current
@@ -818,44 +841,54 @@ export default function JournalPage() {
     console.log('Period key generated:', key, 'type:', type)
 
     ;(async () => {
-      console.log('Loading entry for:', type, key)
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
-        console.log('loadEntry: no user')
-        return
-      }
+      try {
+        console.log('Loading entry for:', type, key)
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        if (!user) {
+          console.log('loadEntry: no user')
+          return
+        }
 
-      const { data, error } = await supabase
-        .from('journal_entries')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('journal_type', type)
-        .eq('period_key', key)
-        .maybeSingle()
+        const { data, error } = await supabase
+          .from('journal_entries')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('journal_type', type)
+          .eq('period_key', key)
+          .maybeSingle()
 
-      console.log('Loaded entry:', data)
-      console.log('Load error:', error)
+        console.log('Loaded entry:', data)
+        console.log('Load error:', error)
 
-      if (requestId !== loadRequestIdRef.current) return
-
-      const editor = editorRef.current
-      const html = data?.content ?? ''
-      if (editor && editor.innerHTML !== html) {
-        editor.innerHTML = html
-      }
-      setEditorHtml(html)
-      setBaselineHtml(html)
-      baselineHtmlRef.current = html
-      setLastSavedAt(data?.updated_at ? new Date(data.updated_at) : null)
-
-      queueMicrotask(() => {
         if (requestId !== loadRequestIdRef.current) return
-        hydrateImageWrappers(editorRef.current, syncEditorFromDom)
-      })
+
+        const editor = editorRef.current
+        const html = data?.content ?? ''
+        if (editor && editor.innerHTML !== html) {
+          editor.innerHTML = html
+        }
+        setEditorHtml(html)
+        setBaselineHtml(html)
+        baselineHtmlRef.current = html
+        setLastSavedAt(data?.updated_at ? new Date(data.updated_at) : null)
+
+        queueMicrotask(() => {
+          if (requestId !== loadRequestIdRef.current) return
+          hydrateImageWrappers(editorRef.current, syncEditorFromDom)
+        })
+      } finally {
+        if (requestId === loadRequestIdRef.current) {
+          setEditorContentLoading(false)
+        }
+      }
     })()
   }, [journalType, periodKey, isDirty, userId, syncEditorFromDom])
+
+  useEffect(() => {
+    mainColumnRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [journalType, periodKey])
 
   useEffect(() => {
     const interval = setInterval(() => setRefreshTick((value) => value + 1), 30000)
@@ -1109,6 +1142,11 @@ export default function JournalPage() {
     queueAction({ kind: 'period', value: now })
   }
 
+  function openSidebarEntry(entry) {
+    const targetDate = parsePeriodDate(entry.journal_type, entry.period_key)
+    queueAction({ kind: 'period', value: targetDate })
+  }
+
   async function handleDeleteEntry(entryId) {
     if (!userId || !entryId) return
     const previous = allEntries
@@ -1237,8 +1275,9 @@ export default function JournalPage() {
             ) : (
               entriesForType.map((entry) => {
                 const entryId = entry.id || `${entry.journal_type}:${entry.period_key}`
-                const expanded = Boolean(expandedEntryIds[entryId])
                 const preview = getPreviewText(entry.content)
+                const isActiveInEditor =
+                  entry.period_key === periodKey && entry.journal_type === journalType
                 return (
                   <div
                     key={entryId}
@@ -1246,21 +1285,18 @@ export default function JournalPage() {
                     onMouseLeave={() => setHoveredEntryId(null)}
                     style={{
                       position: 'relative',
-                      border: '1px solid var(--border)',
+                      border: `1px solid ${isActiveInEditor ? accent : 'var(--border)'}`,
                       borderRadius: '8px',
                       marginTop: '8px',
                       overflow: 'hidden',
-                      background: expanded ? 'var(--bg3)' : 'transparent',
+                      background: isActiveInEditor ? `${accent}14` : 'transparent',
+                      boxShadow: isActiveInEditor ? `inset 0 0 0 1px ${accent}44` : 'none',
                     }}
                   >
                     <button
                       type="button"
-                      onClick={() =>
-                        setExpandedEntryIds((prev) => ({
-                          ...prev,
-                          [entryId]: !prev[entryId],
-                        }))
-                      }
+                      onClick={() => openSidebarEntry(entry)}
+                      title="Open in editor"
                       style={{
                         display: 'grid',
                         gridTemplateColumns: '1fr auto',
@@ -1291,8 +1327,8 @@ export default function JournalPage() {
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ color: 'var(--text3)', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>
-                          ›
+                        <span style={{ color: isActiveInEditor ? accent : 'var(--text3)', fontSize: '14px' }} aria-hidden>
+                          ↗
                         </span>
                       </div>
                     </button>
@@ -1308,7 +1344,7 @@ export default function JournalPage() {
                         style={{
                           position: 'absolute',
                           top: '10px',
-                          right: '10px',
+                          right: '28px',
                           border: 'none',
                           width: '18px',
                           height: '18px',
@@ -1323,18 +1359,6 @@ export default function JournalPage() {
                         ×
                       </button>
                     ) : null}
-
-                    {expanded ? (
-                      <div
-                        style={{
-                          borderTop: '1px solid var(--border)',
-                          padding: '10px',
-                          fontSize: '12px',
-                          color: 'var(--text2)',
-                        }}
-                        dangerouslySetInnerHTML={{ __html: entry.content || '<p style="color:var(--text3)">Empty entry</p>' }}
-                      />
-                    ) : null}
                   </div>
                 )
               })
@@ -1342,7 +1366,10 @@ export default function JournalPage() {
           </div>
         </aside>
 
-        <main style={{ background: 'var(--page-bg)', padding: '26px 24px 20px', overflowY: 'auto' }}>
+        <main
+          ref={mainColumnRef}
+          style={{ background: 'var(--page-bg)', padding: '26px 24px 20px', overflowY: 'auto' }}
+        >
           <div style={{ maxWidth: '720px', margin: '0 auto', minHeight: 'calc(100vh - 130px)', display: 'flex', flexDirection: 'column' }}>
             <div style={{ fontSize: '11px', fontFamily: 'monospace', letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text3)' }}>
               {typeMeta.shortLabel}
@@ -1517,6 +1544,9 @@ export default function JournalPage() {
                 flex: 1,
                 minHeight: '420px',
                 boxShadow: 'inset 0 0 0 1px transparent',
+                opacity: editorContentLoading ? 0.42 : 1,
+                transition: 'opacity 0.22s ease',
+                pointerEvents: editorContentLoading ? 'none' : 'auto',
               }}
             >
               <div
@@ -1530,6 +1560,7 @@ export default function JournalPage() {
                 className="journal-editor"
                 data-placeholder={placeholder}
                 data-empty={isEditorVisuallyEmpty ? 'true' : 'false'}
+                aria-busy={editorContentLoading}
                 style={{
                   height: '100%',
                   minHeight: '420px',
