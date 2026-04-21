@@ -887,10 +887,6 @@ export default function AnalyticsPage() {
       })
       .filter(Boolean)
 
-    if (typeof window !== 'undefined' && scatterData.length > 0) {
-      console.log('Scatter data:', scatterData)
-    }
-
     if (scatterData.length === 0) {
       return { maeMfeScatter: [], maeMfeStats: null }
     }
@@ -1888,7 +1884,7 @@ export default function AnalyticsPage() {
             <span style={{ fontSize: '10px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#fff', padding: '2px 7px', borderRadius: '999px', fontFamily: 'monospace', fontWeight: 700 }}>PRO</span>
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '14px' }}>
-            X: MAE in price points (adverse excursion) · Y: MFE in price points (favorable excursion). Same scale on both axes; diagonal is MAE = MFE. Dot size ∝ contracts. Data comes from optional excursion prices on each trade.
+            X: MAE in price points (adverse excursion) · Y: MFE in price points (favorable excursion). Same scale on both axes; diagonal is MAE = MFE. Dot size reflects contracts and scales down when there are many trades so points stay readable. Data comes from optional excursion prices on each trade.
           </div>
           {filteredTrades.length === 0 ? (
             <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text3)', fontSize: '13px', borderRadius: '10px', border: '1px dashed var(--border)' }}>
@@ -1938,10 +1934,15 @@ export default function AnalyticsPage() {
             const contractVals = maeMfeScatter.map(p => p.contracts)
             const cMin = Math.min(...contractVals, 0)
             const cMax = Math.max(...contractVals, 1)
+            const ptCount = maeMfeScatter.length
+            // Smaller glyphs + extra shrink as N grows so dense plots stay legible.
+            const densityScale = Math.max(0.62, 1 - Math.max(0, ptCount - 18) * 0.011)
             const dotR = (contracts, isH) => {
-              let base = 6
-              if (cMax > cMin) base = 6 + ((contracts - cMin) / (cMax - cMin)) * 8
-              return isH ? Math.min(15, base + 1.5) : base
+              let base = 2.75
+              if (cMax > cMin) base = 2.75 + ((contracts - cMin) / (cMax - cMin)) * 3.25
+              base *= densityScale
+              const r = isH ? base + 1.1 : base
+              return Math.max(1.75, Math.min(isH ? 7.5 : 6.75, r))
             }
             const dotFill = pt =>
               String(pt.status) === 'Win'
@@ -2006,9 +2007,9 @@ export default function AnalyticsPage() {
                         cy={yAt(pt.mfe)}
                         r={dotR(pt.contracts, isH)}
                         fill={dotFill(pt)}
-                        opacity={maeMfeHover === null || isH ? 0.9 : 0.28}
+                        opacity={maeMfeHover === null || isH ? 0.92 : 0.32}
                         stroke={isH ? 'var(--card-bg)' : 'none'}
-                        strokeWidth={isH ? 2 : 0}
+                        strokeWidth={isH ? 1.25 : 0}
                         style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
                         onMouseEnter={() => setMaeMfeHover(i)}
                       />
