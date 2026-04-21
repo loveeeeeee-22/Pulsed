@@ -8,6 +8,13 @@ import { supabase } from '@/lib/supabase'
 
 const PROFIT_COLOR = '#22C55E'
 const LOSS_COLOR = '#EF4444'
+const AMBER_COLOR = '#EAB308'
+
+function exitEfficiencyColor(pct) {
+  if (pct >= 80) return PROFIT_COLOR
+  if (pct >= 50) return AMBER_COLOR
+  return LOSS_COLOR
+}
 
 const DATE_RANGES = [
   { id: '7d', label: 'Last 7 days' },
@@ -837,16 +844,66 @@ export default function AnalyticsPage() {
     return { points, maxDrawdown, currentDrawdown }
   }, [filteredTrades])
 
-  // PRO: MAE/MFE scatter
-  const maeMfeData = useMemo(() => {
-    const pts = filteredTrades.filter(t => t.mae != null && t.mfe != null).map(t => ({
-      mae: asNum(t.mae),
-      mfe: asNum(t.mfe),
-      status: t.status,
-      symbol: t.symbol,
-      pnl: asNum(t.net_pnl),
-    }))
-    return pts
+  // PRO: MAE/MFE scatter (from stored mae_price / mfe_price + entry / exit)
+  const { maeMfeScatter, maeMfeStats } = useMemo(() => {
+    const scatterData = filteredTrades
+      .filter(
+        t =>
+          t.mae_price != null &&
+          t.mfe_price != null &&
+          t.entry_price != null &&
+          t.exit_price != null,
+      )
+      .map(t => {
+        const isLong = String(t.direction || '').toLowerCase() === 'long'
+        const entry = parseFloat(t.entry_price)
+        const mae = parseFloat(t.mae_price)
+        const mfe = parseFloat(t.mfe_price)
+        const exit = parseFloat(t.exit_price)
+        if (![entry, mae, mfe, exit].every(Number.isFinite)) return null
+
+        const maePoints = isLong ? entry - mae : mae - entry
+        const mfePoints = isLong ? mfe - entry : entry - mfe
+        const actualPoints = isLong ? exit - entry : entry - exit
+
+        const exitEfficiency = mfePoints > 0 ? (actualPoints / mfePoints) * 100 : 0
+        const entryEfficiency = mfePoints > 0 ? ((mfePoints - maePoints) / mfePoints) * 100 : 0
+
+        return {
+          x: Math.max(0, maePoints),
+          y: Math.max(0, mfePoints),
+          mae: Math.max(0, maePoints),
+          mfe: Math.max(0, mfePoints),
+          pnl: asNum(t.net_pnl),
+          symbol: t.symbol,
+          date: t.date,
+          status: t.status,
+          direction: t.direction,
+          contracts: Math.max(0, asNum(t.contracts) || 0),
+          exitEfficiency,
+          entryEfficiency,
+          actualPoints,
+        }
+      })
+      .filter(Boolean)
+
+    if (typeof window !== 'undefined' && scatterData.length > 0) {
+      console.log('Scatter data:', scatterData)
+    }
+
+    if (scatterData.length === 0) {
+      return { maeMfeScatter: [], maeMfeStats: null }
+    }
+
+    const avgExit = scatterData.reduce((s, p) => s + p.exitEfficiency, 0) / scatterData.length
+    const avgEntry = scatterData.reduce((s, p) => s + p.entryEfficiency, 0) / scatterData.length
+    const best = scatterData.reduce((a, b) => (b.exitEfficiency > a.exitEfficiency ? b : a))
+    const worst = scatterData.reduce((a, b) => (b.exitEfficiency < a.exitEfficiency ? b : a))
+
+    return {
+      maeMfeScatter: scatterData,
+      maeMfeStats: { avgExit, avgEntry, best, worst },
+    }
   }, [filteredTrades])
 
   const heatmapData = useMemo(() => {
@@ -1831,74 +1888,209 @@ export default function AnalyticsPage() {
             <span style={{ fontSize: '10px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#fff', padding: '2px 7px', borderRadius: '999px', fontFamily: 'monospace', fontWeight: 700 }}>PRO</span>
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '14px' }}>
-            X-axis: Maximum Adverse Excursion (how far it went against you) · Y-axis: Maximum Favorable Excursion (peak profit available). Dots hugging the top axis = exiting winners too early. Dots far right = holding losers too long.
+            X: MAE in price points (adverse excursion) · Y: MFE in price points (favorable excursion). Same scale on both axes; diagonal is MAE = MFE. Dot size ∝ contracts. Data comes from optional excursion prices on each trade.
           </div>
-          {maeMfeData.length === 0 ? (
+          {filteredTrades.length === 0 ? (
+            <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text3)', fontSize: '13px', borderRadius: '10px', border: '1px dashed var(--border)' }}>
+              No trades match your filters. Widen the date range or choose a different account.
+            </div>
+          ) : maeMfeScatter.length === 0 ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '24px', padding: '28px 20px', background: 'rgba(139,92,246,0.05)', borderRadius: '10px', border: '1px dashed rgba(139,92,246,0.25)' }}>
-              <div style={{ fontSize: '40px', flexShrink: 0 }}>📡</div>
-              <div>
-                <div style={{ fontWeight: 600, marginBottom: '4px', color: 'var(--text)' }}>MAE / MFE data not yet available</div>
-                <div style={{ fontSize: '12px', color: 'var(--text3)', lineHeight: 1.55 }}>
-                  This chart requires Maximum Adverse Excursion and Maximum Favorable Excursion data per trade.<br />
-                  These values are captured by broker integrations (MT5/Tradovate) or can be manually logged in the future.<br />
-                  <span style={{ color: '#8B5CF6', fontWeight: 600 }}>Once connected, this becomes the single most powerful chart for optimizing stops and targets.</span>
+              <div style={{ fontSize: '40px', flexShrink: 0 }}>📈</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, marginBottom: '6px', color: 'var(--text)' }}>Add MAE/MFE prices when logging trades to unlock this chart</div>
+                <div style={{ fontSize: '12px', color: 'var(--text3)', lineHeight: 1.55, marginBottom: '12px' }}>
+                  Enter the lowest and highest price reached during the trade on the new trade form. The chart plots excursion in points and exit efficiency.
                 </div>
+                <button
+                  type="button"
+                  onClick={() => router.push('/new-trade')}
+                  style={{
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '8px 14px',
+                    background: '#8B5CF6',
+                    color: '#fff',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Log a Trade →
+                </button>
               </div>
             </div>
           ) : (() => {
-            const allMae = maeMfeData.map(p => p.mae)
-            const allMfe = maeMfeData.map(p => p.mfe)
-            const maxMae = Math.max(...allMae, 1)
-            const maxMfe = Math.max(...allMfe, 1)
-            const w = 900, h = 300, padL = 60, padB = 40, padT = 14, padR = 20
+            const allMae = maeMfeScatter.map(p => p.mae)
+            const allMfe = maeMfeScatter.map(p => p.mfe)
+            const maxVal = Math.max(1, ...allMae, ...allMfe)
+            const w = 900
+            const h = 320
+            const padL = 60
+            const padB = 44
+            const padT = 36
+            const padR = 24
             const plotW = w - padL - padR
             const plotH = h - padB - padT
-            const xAt = (v) => padL + (v / maxMae) * plotW
-            const yAt = (v) => padT + (1 - v / maxMfe) * plotH
-            const hPt = maeMfeHover != null ? maeMfeData[maeMfeHover] : null
+            const xAt = v => padL + (v / maxVal) * plotW
+            const yAt = v => padT + (1 - v / maxVal) * plotH
+            const hPt = maeMfeHover != null ? maeMfeScatter[maeMfeHover] : null
+            const contractVals = maeMfeScatter.map(p => p.contracts)
+            const cMin = Math.min(...contractVals, 0)
+            const cMax = Math.max(...contractVals, 1)
+            const dotR = (contracts, isH) => {
+              let base = 6
+              if (cMax > cMin) base = 6 + ((contracts - cMin) / (cMax - cMin)) * 8
+              return isH ? Math.min(15, base + 1.5) : base
+            }
+            const dotFill = pt =>
+              String(pt.status) === 'Win'
+                ? PROFIT_COLOR
+                : String(pt.status) === 'Loss'
+                  ? LOSS_COLOR
+                  : 'var(--text3)'
+            const fmtDir = d => {
+              const s = String(d || '').toLowerCase()
+              if (s === 'long') return 'Long'
+              if (s === 'short') return 'Short'
+              return d || '—'
+            }
             return (
               <div onMouseLeave={() => setMaeMfeHover(null)}>
                 <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', cursor: 'crosshair' }}>
                   <line x1={padL} y1={padT} x2={padL} y2={padT + plotH} stroke="var(--border)" strokeWidth="1" />
                   <line x1={padL} y1={padT + plotH} x2={padL + plotW} y2={padT + plotH} stroke="var(--border)" strokeWidth="1" />
-                  <text x={padL + plotW / 2} y={h - 4} textAnchor="middle" fontSize="10" fill="var(--text3)">Maximum Adverse Excursion ($)</text>
-                  <text x={12} y={padT + plotH / 2} textAnchor="middle" fontSize="10" fill="var(--text3)" transform={`rotate(-90, 12, ${padT + plotH / 2})`}>Max Favorable Excursion ($)</text>
-                  {maeMfeData.map((pt, i) => {
+                  <line
+                    x1={xAt(0)}
+                    y1={yAt(0)}
+                    x2={xAt(maxVal)}
+                    y2={yAt(maxVal)}
+                    stroke="rgba(139,92,246,0.45)"
+                    strokeWidth="1.5"
+                    strokeDasharray="6 4"
+                  />
+                  <text x={padL + plotW / 2} y={h - 6} textAnchor="middle" fontSize="10" fill="var(--text3)">
+                    MAE (points)
+                  </text>
+                  <text
+                    x={12}
+                    y={padT + plotH / 2}
+                    textAnchor="middle"
+                    fontSize="10"
+                    fill="var(--text3)"
+                    transform={`rotate(-90, 12, ${padT + plotH / 2})`}
+                  >
+                    MFE (points)
+                  </text>
+                  <text x={xAt(maxVal) - 6} y={yAt(maxVal) + 14} textAnchor="end" fontSize="9" fill="#8B5CF6" fontFamily="monospace">
+                    MAE = MFE
+                  </text>
+                  <text x={padL + 6} y={padT + 48} fontSize="9" fill="#22C55E" fontWeight="600">
+                    Perfect entries
+                  </text>
+                  <text x={padL + plotW * 0.5} y={padT + 16} fontSize="9" fill="#EAB308" fontWeight="600">
+                    Survived but risky
+                  </text>
+                  <text x={padL + 6} y={padT + plotH * 0.88} fontSize="9" fill="#3B82F6" fontWeight="600">
+                    Tight but small
+                  </text>
+                  <text x={padL + plotW * 0.52} y={padT + plotH * 0.88} fontSize="9" fill="#EF4444" fontWeight="600">
+                    Poor entries
+                  </text>
+                  {maeMfeScatter.map((pt, i) => {
                     const isH = maeMfeHover === i
                     return (
                       <circle
                         key={i}
                         cx={xAt(pt.mae)}
                         cy={yAt(pt.mfe)}
-                        r={isH ? 8 : 5}
-                        fill={pt.status === 'Win' ? PROFIT_COLOR : LOSS_COLOR}
-                        opacity={maeMfeHover === null || isH ? 0.85 : 0.25}
+                        r={dotR(pt.contracts, isH)}
+                        fill={dotFill(pt)}
+                        opacity={maeMfeHover === null || isH ? 0.9 : 0.28}
                         stroke={isH ? 'var(--card-bg)' : 'none'}
                         strokeWidth={isH ? 2 : 0}
-                        style={{ cursor: 'pointer', transition: 'r 0.1s, opacity 0.15s' }}
+                        style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
                         onMouseEnter={() => setMaeMfeHover(i)}
                       />
                     )
                   })}
-                  {/* Tooltip for hovered scatter point */}
-                  {hPt && (() => {
-                    const cx = xAt(hPt.mae)
-                    const cy = yAt(hPt.mfe)
-                    const tipX = cx > w * 0.6 ? cx - 160 : cx + 14
-                    const tipY = cy > h * 0.6 ? cy - 90 : cy + 10
-                    return (
-                      <g pointerEvents="none">
-                        <line x1={cx} y1={padT} x2={cx} y2={padT + plotH} stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="4 3" />
-                        <line x1={padL} y1={cy} x2={padL + plotW} y2={cy} stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="4 3" />
-                        <rect x={tipX} y={tipY} width={152} height={76} rx="8" fill="var(--card-bg)" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
-                        <text x={tipX + 10} y={tipY + 17} fontSize="11" fill={hPt.status === 'Win' ? PROFIT_COLOR : LOSS_COLOR} fontFamily="monospace" fontWeight="700">{hPt.status} · {hPt.symbol || '—'}</text>
-                        <text x={tipX + 10} y={tipY + 34} fontSize="10" fill="var(--text3)" fontFamily="monospace">MAE: ${hPt.mae.toFixed(2)}</text>
-                        <text x={tipX + 10} y={tipY + 50} fontSize="10" fill="var(--text3)" fontFamily="monospace">MFE: ${hPt.mfe.toFixed(2)}</text>
-                        <text x={tipX + 10} y={tipY + 66} fontSize="10" fill={hPt.pnl >= 0 ? PROFIT_COLOR : LOSS_COLOR} fontFamily="monospace">P&amp;L: {hPt.pnl >= 0 ? '+' : ''}${hPt.pnl.toFixed(2)}</text>
-                      </g>
-                    )
-                  })()}
+                  {hPt &&
+                    (() => {
+                      const cx = xAt(hPt.mae)
+                      const cy = yAt(hPt.mfe)
+                      const tipX = cx > w * 0.58 ? cx - 176 : cx + 14
+                      const tipY = cy > h * 0.55 ? cy - 118 : cy + 12
+                      const effCol = exitEfficiencyColor(hPt.exitEfficiency)
+                      return (
+                        <g pointerEvents="none">
+                          <line x1={cx} y1={padT} x2={cx} y2={padT + plotH} stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="4 3" />
+                          <line x1={padL} y1={cy} x2={padL + plotW} y2={cy} stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="4 3" />
+                          <rect x={tipX} y={tipY} width={172} height={112} rx="8" fill="var(--card-bg)" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
+                          <text x={tipX + 10} y={tipY + 16} fontSize="9" fill="var(--text3)" fontFamily="monospace">
+                            {String(hPt.date || '').slice(0, 10)}
+                          </text>
+                          <text x={tipX + 10} y={tipY + 32} fontSize="11" fill="var(--text)" fontFamily="monospace" fontWeight="700">
+                            {hPt.symbol || '—'} · {fmtDir(hPt.direction)}
+                          </text>
+                          <text x={tipX + 10} y={tipY + 48} fontSize="10" fill="var(--text3)" fontFamily="monospace">
+                            MAE: {hPt.mae.toFixed(2)} pts
+                          </text>
+                          <text x={tipX + 10} y={tipY + 62} fontSize="10" fill="var(--text3)" fontFamily="monospace">
+                            MFE: {hPt.mfe.toFixed(2)} pts
+                          </text>
+                          <text x={tipX + 10} y={tipY + 78} fontSize="10" fill={effCol} fontFamily="monospace" fontWeight="600">
+                            Exit efficiency: {hPt.exitEfficiency.toFixed(1)}%
+                          </text>
+                          <text x={tipX + 10} y={tipY + 96} fontSize="10" fill={hPt.pnl >= 0 ? PROFIT_COLOR : LOSS_COLOR} fontFamily="monospace">
+                            Net P&amp;L: {hPt.pnl >= 0 ? '+' : ''}
+                            {hPt.pnl.toFixed(2)}
+                          </text>
+                        </g>
+                      )
+                    })()}
                 </svg>
+                {maeMfeStats ? (
+                  <div
+                    style={{
+                      marginTop: '16px',
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                      gap: '12px 20px',
+                      fontSize: '12px',
+                      color: 'var(--text2)',
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    <div>
+                      <span style={{ color: 'var(--text3)' }}>Avg exit efficiency</span>
+                      <div style={{ fontFamily: 'monospace', fontWeight: 700, color: exitEfficiencyColor(maeMfeStats.avgExit) }}>
+                        {maeMfeStats.avgExit.toFixed(1)}%
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--text3)' }}>Share of MFE captured at exit</div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text3)' }}>Avg entry efficiency</span>
+                      <div style={{ fontFamily: 'monospace', fontWeight: 700, color: exitEfficiencyColor(maeMfeStats.avgEntry) }}>
+                        {maeMfeStats.avgEntry.toFixed(1)}%
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--text3)' }}>(MFE − MAE) / MFE — entry timing</div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text3)' }}>Best exit efficiency</span>
+                      <div style={{ fontFamily: 'monospace', fontWeight: 600, color: exitEfficiencyColor(maeMfeStats.best.exitEfficiency) }}>
+                        {maeMfeStats.best.symbol || '—'} · {String(maeMfeStats.best.date || '').slice(0, 10)} ·{' '}
+                        {maeMfeStats.best.exitEfficiency.toFixed(1)}%
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text3)' }}>Worst exit efficiency</span>
+                      <div style={{ fontFamily: 'monospace', fontWeight: 600, color: exitEfficiencyColor(maeMfeStats.worst.exitEfficiency) }}>
+                        {maeMfeStats.worst.symbol || '—'} · {String(maeMfeStats.worst.date || '').slice(0, 10)} ·{' '}
+                        {maeMfeStats.worst.exitEfficiency.toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )
           })()}

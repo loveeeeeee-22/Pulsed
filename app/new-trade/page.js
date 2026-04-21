@@ -34,6 +34,8 @@ const initialForm = {
   fees: "",
   entry_price: "",
   exit_price: "",
+  mae_price: "",
+  mfe_price: "",
   entry_time: "",
   exit_time: "",
   profit_target: "",
@@ -89,6 +91,40 @@ const GRADE_DESCRIPTIONS = {
   D: "Poor — significant errors",
   F: "Failed to follow the plan",
 };
+
+const MAE_TOOLTIP =
+  "Maximum Adverse Excursion — the worst price reached while your trade was open. For longs: the lowest low. For shorts: the highest high.";
+
+const MFE_TOOLTIP =
+  "Maximum Favorable Excursion — the best price reached while your trade was open. For longs: the highest high. For shorts: the lowest low.";
+
+function FieldInfoTip({ text }) {
+  return (
+    <button
+      type="button"
+      title={text}
+      aria-label={text}
+      style={{
+        marginLeft: "6px",
+        width: "18px",
+        height: "18px",
+        borderRadius: "999px",
+        border: "1px solid var(--border-md)",
+        background: "var(--bg3)",
+        color: "var(--text3)",
+        fontSize: "10px",
+        fontWeight: 700,
+        lineHeight: "16px",
+        cursor: "help",
+        padding: 0,
+        flexShrink: 0,
+        verticalAlign: "middle",
+      }}
+    >
+      i
+    </button>
+  );
+}
 
 /** Numeric weights for averaging criteria into overall (auto mode). */
 const OVERALL_AUTO_SCORE = { A: 100, B: 80, C: 65, D: 50, F: 25 };
@@ -370,6 +406,8 @@ export default function NewTradePage() {
       fees: fees,
       entry_price: parseNumber(form.entry_price),
       exit_price: parseNumber(form.exit_price),
+      mae_price: parseNumber(form.mae_price),
+      mfe_price: parseNumber(form.mfe_price),
       entry_time: form.entry_time || null,
       exit_time: form.exit_time || null,
       profit_target: profitTarget,
@@ -823,6 +861,79 @@ export default function NewTradePage() {
             <h2 style={sectionTitleStyle}>
               P&amp;L
             </h2>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2,minmax(0,1fr))",
+                gap: "12px",
+                marginBottom: "12px",
+              }}
+            >
+              <div>
+                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 0 }}>
+                  <label
+                    style={{ ...labelStyle, color: "var(--text2)" }}
+                    htmlFor="mae-price"
+                  >
+                    Lowest price during trade
+                  </label>
+                  <FieldInfoTip text={MAE_TOOLTIP} />
+                </div>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "var(--text3)",
+                    marginBottom: "6px",
+                    opacity: 0.85,
+                  }}
+                >
+                  (How far did price go against you?) · optional
+                </div>
+                <input
+                  id="mae-price"
+                  name="mae-price"
+                  type="number"
+                  autoComplete="off"
+                  step="any"
+                  placeholder="e.g. 4730.50"
+                  style={inputStyle}
+                  value={form.mae_price}
+                  onChange={(e) => updateField("mae_price", e.target.value)}
+                />
+              </div>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 0 }}>
+                  <label
+                    style={{ ...labelStyle, color: "var(--text2)" }}
+                    htmlFor="mfe-price"
+                  >
+                    Highest price during trade
+                  </label>
+                  <FieldInfoTip text={MFE_TOOLTIP} />
+                </div>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "var(--text3)",
+                    marginBottom: "6px",
+                    opacity: 0.85,
+                  }}
+                >
+                  (Peak profit available) · optional
+                </div>
+                <input
+                  id="mfe-price"
+                  name="mfe-price"
+                  type="number"
+                  autoComplete="off"
+                  step="any"
+                  placeholder="e.g. 4795.00"
+                  style={inputStyle}
+                  value={form.mfe_price}
+                  onChange={(e) => updateField("mfe_price", e.target.value)}
+                />
+              </div>
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: "12px" }}>
               <div>
                 <label style={labelStyle} htmlFor="gross-pnl">
