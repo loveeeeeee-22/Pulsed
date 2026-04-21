@@ -12,7 +12,8 @@ export default function AppShell({ children }) {
   const hideSidebar =
     pathname === '/landing' ||
     (typeof pathname === 'string' && pathname.startsWith('/auth')) ||
-    (typeof pathname === 'string' && pathname.startsWith('/maintenance'))
+    (typeof pathname === 'string' && pathname.startsWith('/maintenance')) ||
+    (typeof pathname === 'string' && pathname.startsWith('/admin'))
 
   useEffect(() => {
     if (pathname === '/subscription' || (pathname && pathname.startsWith('/settings'))) {

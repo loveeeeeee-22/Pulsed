@@ -30,6 +30,10 @@ export function middleware(request) {
       return NextResponse.next()
     }
 
+    if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+      return NextResponse.next()
+    }
+
     const bypass = process.env.MAINTENANCE_BYPASS_SECRET
     if (bypass && request.cookies.get('pulsed_maintenance_bypass')?.value === bypass) {
       return NextResponse.next()
