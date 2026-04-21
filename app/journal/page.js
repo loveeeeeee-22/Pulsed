@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 const JOURNAL_TYPES = [
@@ -223,6 +223,378 @@ function formatRelativeSaved(lastSavedAt) {
   return `Saved ${days} day${days === 1 ? '' : 's'} ago`
 }
 
+const PULSED_IMG_BORDER = '#7C3AED'
+
+function getCleanContent(editor) {
+  if (!editor) return ''
+  const clone = editor.cloneNode(true)
+  clone.querySelectorAll('.resize-handle, .size-indicator').forEach((el) => el.remove())
+  clone.querySelectorAll('.pulsed-img-wrapper').forEach((w) => {
+    w.removeAttribute('data-pulsed-img-selected')
+  })
+  clone.querySelectorAll('img').forEach((img) => {
+    img.style.borderColor = 'transparent'
+  })
+  return clone.innerHTML
+}
+
+function deselectAllImageWrappers() {
+  document.querySelectorAll('.pulsed-img-wrapper').forEach((w) => {
+    w.removeAttribute('data-pulsed-img-selected')
+    w.querySelectorAll('.resize-handle').forEach((h) => {
+      h.style.display = 'none'
+    })
+    w.querySelectorAll('.size-indicator').forEach((ind) => {
+      ind.style.display = 'none'
+    })
+    const img = w.querySelector('img')
+    if (img) img.style.borderColor = 'transparent'
+  })
+}
+
+function showSizeIndicator(wrapper, img) {
+  let indicator = wrapper.querySelector('.size-indicator')
+  if (!indicator) {
+    indicator = document.createElement('div')
+    indicator.className = 'size-indicator'
+    indicator.style.cssText = `
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      font-size: 10px;
+      font-family: monospace;
+      padding: 2px 6px;
+      border-radius: 4px;
+      pointer-events: none;
+      z-index: 20;
+    `
+    wrapper.appendChild(indicator)
+  }
+  indicator.textContent = `${Math.round(img.offsetWidth)} × ${Math.round(img.offsetHeight)}px`
+  indicator.style.display = 'block'
+}
+
+function selectImage(wrapper, img) {
+  deselectAllImageWrappers()
+  img.style.borderColor = PULSED_IMG_BORDER
+  wrapper.setAttribute('data-pulsed-img-selected', 'true')
+  wrapper.querySelectorAll('.resize-handle').forEach((h) => {
+    h.style.display = 'block'
+  })
+  showSizeIndicator(wrapper, img)
+}
+
+function showImageContextMenu(e, wrapper, img, onAfterAction) {
+  e.preventDefault()
+  document.querySelector('.img-context-menu')?.remove()
+
+  const menu = document.createElement('div')
+  menu.className = 'img-context-menu'
+  menu.style.cssText = `
+    position: fixed;
+    top: ${e.clientY}px;
+    left: ${e.clientX}px;
+    background: var(--card-bg, #1a1a2e);
+    border: 1px solid rgba(124,58,237,0.3);
+    border-radius: 8px;
+    padding: 4px;
+    z-index: 1000;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    min-width: 160px;
+  `
+
+  const refreshIndicator = () => {
+    window.requestAnimationFrame(() => showSizeIndicator(wrapper, img))
+  }
+
+  const options = [
+    {
+      label: 'Small (160px)',
+      action: () => {
+        img.style.width = '160px'
+        img.style.height = 'auto'
+        refreshIndicator()
+      },
+    },
+    {
+      label: 'Medium (320px)',
+      action: () => {
+        img.style.width = '320px'
+        img.style.height = 'auto'
+        refreshIndicator()
+      },
+    },
+    {
+      label: 'Large (480px)',
+      action: () => {
+        img.style.width = '480px'
+        img.style.height = 'auto'
+        refreshIndicator()
+      },
+    },
+    {
+      label: 'Full width',
+      action: () => {
+        img.style.width = '100%'
+        img.style.height = 'auto'
+        refreshIndicator()
+      },
+    },
+    { label: '─────────', action: null },
+    {
+      label: '🗑 Delete image',
+      action: () => {
+        wrapper.remove()
+      },
+      danger: true,
+    },
+  ]
+
+  options.forEach(({ label, action, danger }) => {
+    const item = document.createElement('div')
+    item.textContent = label
+    item.style.cssText = `
+      padding: 7px 12px;
+      font-size: 13px;
+      font-family: sans-serif;
+      cursor: ${action ? 'pointer' : 'default'};
+      border-radius: 5px;
+      color: ${danger ? '#EF4444' : 'rgba(240,238,248,0.85)'};
+      ${!action ? 'pointer-events: none; opacity: 0.3;' : ''}
+    `
+    if (action) {
+      item.addEventListener('mouseenter', () => {
+        item.style.background = 'rgba(124,58,237,0.15)'
+      })
+      item.addEventListener('mouseleave', () => {
+        item.style.background = 'transparent'
+      })
+      item.addEventListener('click', () => {
+        action()
+        menu.remove()
+        onAfterAction?.()
+      })
+    }
+    menu.appendChild(item)
+  })
+
+  document.body.appendChild(menu)
+
+  setTimeout(() => {
+    document.addEventListener('click', () => menu.remove(), { once: true })
+  }, 0)
+}
+
+function addResizeHandles(wrapper, img, onDomChange) {
+  const positions = [
+    { pos: 'nw', cursor: 'nw-resize', top: '-5px', left: '-5px' },
+    { pos: 'ne', cursor: 'ne-resize', top: '-5px', right: '-5px' },
+    { pos: 'sw', cursor: 'sw-resize', bottom: '-5px', left: '-5px' },
+    { pos: 'se', cursor: 'se-resize', bottom: '-5px', right: '-5px' },
+  ]
+
+  positions.forEach(({ pos, cursor, top, right, bottom, left }) => {
+    const handle = document.createElement('div')
+    handle.className = `resize-handle resize-${pos}`
+    handle.style.cssText = `
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: white;
+      border: 1.5px solid ${PULSED_IMG_BORDER};
+      border-radius: 2px;
+      cursor: ${cursor};
+      display: none;
+      z-index: 10;
+      ${top ? `top: ${top};` : ''}
+      ${right ? `right: ${right};` : ''}
+      ${bottom ? `bottom: ${bottom};` : ''}
+      ${left ? `left: ${left};` : ''}
+    `
+
+    handle.addEventListener('mousedown', (ev) => {
+      ev.preventDefault()
+      ev.stopPropagation()
+
+      const startX = ev.clientX
+      const startWidth = img.offsetWidth
+      const isLeft = pos.includes('w')
+
+      const onMouseMove = (moveEv) => {
+        const dx = moveEv.clientX - startX
+        const newWidth = isLeft ? startWidth - dx : startWidth + dx
+        const cap = wrapper.parentElement?.offsetWidth || 800
+        const clampedWidth = Math.max(80, Math.min(newWidth, cap))
+        img.style.width = `${clampedWidth}px`
+        img.style.height = 'auto'
+        showSizeIndicator(wrapper, img)
+      }
+
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove)
+        document.removeEventListener('mouseup', onMouseUp)
+        onDomChange?.()
+      }
+
+      document.addEventListener('mousemove', onMouseMove)
+      document.addEventListener('mouseup', onMouseUp)
+    })
+
+    wrapper.appendChild(handle)
+  })
+
+  const bottomHandle = document.createElement('div')
+  bottomHandle.className = 'resize-handle resize-s'
+  bottomHandle.style.cssText = `
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: white;
+    border: 1.5px solid ${PULSED_IMG_BORDER};
+    border-radius: 2px;
+    cursor: s-resize;
+    display: none;
+    z-index: 10;
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+  `
+
+  bottomHandle.addEventListener('mousedown', (ev) => {
+    ev.preventDefault()
+    ev.stopPropagation()
+    const startY = ev.clientY
+    const startWidth = img.offsetWidth
+    const startHeight = img.offsetHeight || 1
+    const cap = wrapper.parentElement?.offsetWidth || 800
+
+    const onMouseMove = (moveEv) => {
+      const dy = moveEv.clientY - startY
+      const scale = (startHeight + dy) / startHeight
+      const newW = Math.max(80, Math.min(startWidth * scale, cap))
+      img.style.width = `${newW}px`
+      img.style.height = 'auto'
+      showSizeIndicator(wrapper, img)
+    }
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      onDomChange?.()
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  })
+
+  wrapper.appendChild(bottomHandle)
+}
+
+function insertImageAtCursor(editor, src, { onInserted, onDomChange } = {}) {
+  if (!editor) return
+
+  const wrapper = document.createElement('div')
+  wrapper.className = 'pulsed-img-wrapper'
+  wrapper.style.cssText = `
+    display: inline-block;
+    position: relative;
+    margin: 8px 4px;
+    cursor: default;
+    max-width: 100%;
+  `
+  wrapper.contentEditable = 'false'
+
+  const img = document.createElement('img')
+  img.src = src
+  img.style.cssText = `
+    width: 320px;
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    transition: border-color 0.15s;
+    cursor: pointer;
+  `
+  img.draggable = false
+
+  img.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    selectImage(wrapper, img)
+  })
+
+  img.addEventListener('contextmenu', (ev) => {
+    selectImage(wrapper, img)
+    showImageContextMenu(ev, wrapper, img, onDomChange)
+  })
+
+  wrapper.appendChild(img)
+  addResizeHandles(wrapper, img, onDomChange)
+
+  editor.focus()
+  const selection = window.getSelection()
+  if (selection && selection.rangeCount > 0) {
+    const range = selection.getRangeAt(0)
+    range.deleteContents()
+    range.insertNode(wrapper)
+
+    range.setStartAfter(wrapper)
+    range.setEndAfter(wrapper)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  } else {
+    editor.appendChild(wrapper)
+  }
+
+  onInserted?.()
+}
+
+function handleEditorPaste(e, editor, callbacks) {
+  const items = e.clipboardData?.items
+  if (!items) return
+
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault()
+      const file = item.getAsFile()
+      if (!file) continue
+      if (file.size > 2 * 1024 * 1024) {
+        window.alert(
+          'Image is large (over 2MB). Consider using a smaller image for better performance.',
+        )
+      }
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const imgSrc = event.target.result
+        insertImageAtCursor(editor, imgSrc, callbacks)
+      }
+      reader.readAsDataURL(file)
+      return
+    }
+  }
+}
+
+function hydrateImageWrappers(editor, onDomChange) {
+  if (!editor) return
+  editor.querySelectorAll('.pulsed-img-wrapper').forEach((wrapper) => {
+    if (wrapper.querySelector('.resize-handle')) return
+    const img = wrapper.querySelector('img')
+    if (!img) return
+    wrapper.contentEditable = 'false'
+    img.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      selectImage(wrapper, img)
+    })
+    img.addEventListener('contextmenu', (ev) => {
+      selectImage(wrapper, img)
+      showImageContextMenu(ev, wrapper, img, onDomChange)
+    })
+    addResizeHandles(wrapper, img, onDomChange)
+  })
+}
+
 function JournalTypeIcon({ type, color }) {
   if (type === 'weekly') {
     return (
@@ -269,6 +641,42 @@ export default function JournalPage() {
   const [refreshTick, setRefreshTick] = useState(0)
   const editorRef = useRef(null)
   const saveFlashTimerRef = useRef(null)
+  const baselineHtmlRef = useRef(baselineHtml)
+
+  useLayoutEffect(() => {
+    baselineHtmlRef.current = baselineHtml
+  }, [baselineHtml])
+
+  const syncEditorFromDom = useCallback(() => {
+    const html = getCleanContent(editorRef.current)
+    setEditorHtml(html)
+    setIsDirty(html !== baselineHtmlRef.current)
+  }, [])
+
+  const imageEditorCallbacks = useMemo(
+    () => ({ onInserted: syncEditorFromDom, onDomChange: syncEditorFromDom }),
+    [syncEditorFromDom],
+  )
+
+  const handlePaste = useCallback(
+    (e) => {
+      handleEditorPaste(e, editorRef.current, imageEditorCallbacks)
+    },
+    [imageEditorCallbacks],
+  )
+
+  const handleKeyDown = useCallback(
+    (e) => {
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return
+      const selected = document.querySelector('.pulsed-img-wrapper[data-pulsed-img-selected="true"]')
+      if (selected) {
+        e.preventDefault()
+        selected.remove()
+        syncEditorFromDom()
+      }
+    },
+    [syncEditorFromDom],
+  )
   const typeMeta = useMemo(
     () => JOURNAL_TYPES.find((item) => item.id === journalType) || JOURNAL_TYPES[0],
     [journalType],
@@ -331,11 +739,13 @@ export default function JournalPage() {
   }, [])
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- read persisted accent once on mount */
     const raw = typeof window !== 'undefined' ? window.localStorage.getItem('accentColor') : null
     if (raw && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw)) {
       setAccent(raw)
       document.documentElement.style.setProperty('--accent', raw)
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [])
 
   useEffect(() => {
@@ -358,15 +768,21 @@ export default function JournalPage() {
   }, [fetchEntries])
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- editor state follows loaded entry when !isDirty */
     if (isDirty) return
     const nextHtml = currentEntry?.content || ''
     setEditorHtml(nextHtml)
     setBaselineHtml(nextHtml)
+    baselineHtmlRef.current = nextHtml
     setLastSavedAt(currentEntry?.updated_at ? new Date(currentEntry.updated_at) : null)
     if (editorRef.current && editorRef.current.innerHTML !== nextHtml) {
       editorRef.current.innerHTML = nextHtml
     }
-  }, [currentEntry, periodKey, journalType, isDirty])
+    /* eslint-enable react-hooks/set-state-in-effect */
+    queueMicrotask(() => {
+      hydrateImageWrappers(editorRef.current, syncEditorFromDom)
+    })
+  }, [currentEntry, periodKey, journalType, isDirty, syncEditorFromDom])
 
   useEffect(() => {
     const interval = setInterval(() => setRefreshTick((value) => value + 1), 30000)
@@ -382,10 +798,20 @@ export default function JournalPage() {
     }
   }, [savedFlash])
 
+  useEffect(() => {
+    function onDocClick(ev) {
+      if (!ev.target.closest('.pulsed-img-wrapper')) {
+        deselectAllImageWrappers()
+      }
+    }
+    document.addEventListener('click', onDocClick)
+    return () => document.removeEventListener('click', onDocClick)
+  }, [])
+
   const runSave = useCallback(
     async ({ silent = false } = {}) => {
       if (!userId || isSaving) return { ok: false }
-      const html = editorRef.current?.innerHTML || editorHtml
+      const html = getCleanContent(editorRef.current) || editorHtml
       const existing = allEntries.find(
         (entry) => entry.journal_type === journalType && entry.period_key === periodKey,
       )
@@ -419,6 +845,7 @@ export default function JournalPage() {
 
       await fetchEntries(userId)
       setBaselineHtml(html)
+      baselineHtmlRef.current = html
       setEditorHtml(html)
       setIsDirty(false)
       setLastSavedAt(new Date())
@@ -476,16 +903,17 @@ export default function JournalPage() {
   }
 
   function handleEditorInput() {
-    const html = editorRef.current?.innerHTML || ''
+    const html = getCleanContent(editorRef.current) || ''
     setEditorHtml(html)
     setIsDirty(html !== baselineHtml)
   }
 
   function applyCommand(command, value = null) {
-    editorRef.current?.focus()
+    const editorEl = document.getElementById('noteEditor')
+    editorEl?.focus()
     document.execCommand(command, false, value)
     setTimeout(() => {
-      const html = editorRef.current?.innerHTML || ''
+      const html = getCleanContent(document.getElementById('noteEditor')) || ''
       setEditorHtml(html)
       setIsDirty(html !== baselineHtml)
     }, 0)
@@ -861,6 +1289,50 @@ export default function JournalPage() {
               {toolbarButton('H', () => applyCommand('formatBlock', '<h2>'))}
               {toolbarButton('—', () => applyCommand('insertHorizontalRule'))}
               {toolbarButton('Clear', () => applyCommand('removeFormat'))}
+              <button
+                type="button"
+                title="Insert image"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  document.getElementById('journal-img-upload')?.click()
+                }}
+                style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '5px',
+                  border: '1px solid var(--border-md)',
+                  background: 'none',
+                  color: 'var(--text2)',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                🖼
+              </button>
+              <input
+                id="journal-img-upload"
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  if (file.size > 2 * 1024 * 1024) {
+                    window.alert(
+                      'Image is large (over 2MB). Consider using a smaller image for better performance.',
+                    )
+                  }
+                  const reader = new FileReader()
+                  reader.onload = (event) => {
+                    insertImageAtCursor(editorRef.current, event.target.result, imageEditorCallbacks)
+                  }
+                  reader.readAsDataURL(file)
+                  e.target.value = ''
+                }}
+              />
             </div>
 
             <div
@@ -875,10 +1347,13 @@ export default function JournalPage() {
               }}
             >
               <div
+                id="noteEditor"
                 ref={editorRef}
-                contentEditable
-                suppressContentEditableWarning
+                contentEditable={true}
+                suppressContentEditableWarning={true}
                 onInput={handleEditorInput}
+                onPaste={handlePaste}
+                onKeyDown={handleKeyDown}
                 className="journal-editor"
                 data-placeholder={placeholder}
                 data-empty={isEditorVisuallyEmpty ? 'true' : 'false'}

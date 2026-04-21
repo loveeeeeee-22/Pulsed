@@ -174,3 +174,29 @@ tr:hover td {
 .fade-in {
   animation: fadeIn 0.2s ease forwards;
 }
+
+/* Journal editor image styles (#noteEditor) */
+#noteEditor img {
+  max-width: 100% !important;
+  width: 320px;
+  height: auto !important;
+  display: inline-block !important;
+  border-radius: 6px;
+  vertical-align: middle;
+}
+
+#noteEditor {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+#noteEditor .pulsed-img-wrapper {
+  display: inline-block;
+  position: relative;
+  line-height: 0;
+  margin: 8px 4px;
+}
+
+#noteEditor img::selection {
+  background: transparent;
+}
