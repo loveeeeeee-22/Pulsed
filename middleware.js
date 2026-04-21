@@ -34,8 +34,7 @@ export function middleware(request) {
       return NextResponse.next()
     }
 
-    const bypass = process.env.MAINTENANCE_BYPASS_SECRET
-    if (bypass && request.cookies.get('pulsed_maintenance_bypass')?.value === bypass) {
+    if (pathname === '/auth' || pathname.startsWith('/auth/')) {
       return NextResponse.next()
     }
 

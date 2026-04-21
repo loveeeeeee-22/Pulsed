@@ -3,12 +3,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
-const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'pulsed-admin'
+const ADMIN_EMAIL = (process.env.NEXT_PUBLIC_ADMIN_EMAIL || '').trim().toLowerCase()
 
 export default function MaintenanceAdmin() {
-  const [authed, setAuthed] = useState(false)
-  const [adminPassword, setAdminPassword] = useState('')
-  const [password, setPassword] = useState('')
+  const [authChecking, setAuthChecking] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -33,27 +31,49 @@ export default function MaintenanceAdmin() {
   }, [])
 
   useEffect(() => {
-    if (authed) void fetchSettings()
-  }, [authed, fetchSettings])
+    async function checkAuth() {
+      if (!ADMIN_EMAIL) {
+        window.location.href = '/'
+        return
+      }
 
-  function tryLogin(pwd) {
-    if (pwd === ADMIN_PASSWORD) {
-      setAdminPassword(pwd)
-      setAuthed(true)
-      setSaveError('')
-    } else {
-      window.alert('Wrong password')
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      const email = (user?.email || '').trim().toLowerCase()
+      if (!user) {
+        window.location.href = '/auth'
+        return
+      }
+      if (email !== ADMIN_EMAIL) {
+        window.location.href = '/'
+        return
+      }
+
+      setAuthChecking(false)
+      await fetchSettings()
     }
-  }
+
+    void checkAuth()
+  }, [fetchSettings])
 
   async function saveSettings() {
     setSaving(true)
     setSaveError('')
     setSaved(false)
 
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session?.access_token) {
+      setSaveError('Not signed in. Open the app and sign in as the admin user, then return here.')
+      setSaving(false)
+      return
+    }
+
     const endsAtIso = form.ends_at ? new Date(form.ends_at).toISOString() : null
     const payload = {
-      password: adminPassword,
       is_active: form.is_active,
       message: form.message,
       ends_at: endsAtIso,
@@ -63,7 +83,10 @@ export default function MaintenanceAdmin() {
     try {
       const res = await fetch('/api/admin/maintenance', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify(payload),
         cache: 'no-store',
       })
@@ -86,7 +109,7 @@ export default function MaintenanceAdmin() {
     }
   }
 
-  if (!authed) {
+  if (authChecking) {
     return (
       <div
         style={{
@@ -95,83 +118,12 @@ export default function MaintenanceAdmin() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          fontFamily: 'sans-serif',
+          fontFamily: 'monospace',
+          color: '#55536A',
+          fontSize: '13px',
         }}
       >
-        <div
-          style={{
-            background: '#111118',
-            border: '1px solid rgba(255,255,255,0.07)',
-            borderRadius: '12px',
-            padding: '32px',
-            width: '320px',
-            maxWidth: 'calc(100vw - 32px)',
-            textAlign: 'center',
-          }}
-        >
-          <div
-            style={{
-              fontSize: '14px',
-              fontFamily: 'monospace',
-              color: '#7C3AED',
-              marginBottom: '8px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-            }}
-          >
-            Admin Access
-          </div>
-          <div
-            style={{
-              fontSize: '20px',
-              fontWeight: '600',
-              color: '#F0EEF8',
-              marginBottom: '24px',
-            }}
-          >
-            Maintenance Control
-          </div>
-          <input
-            type="password"
-            name="admin-password"
-            autoComplete="current-password"
-            placeholder="Enter admin password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') tryLogin(password)
-            }}
-            style={{
-              width: '100%',
-              background: '#18181F',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '8px',
-              color: '#F0EEF8',
-              padding: '10px 14px',
-              fontSize: '14px',
-              outline: 'none',
-              marginBottom: '12px',
-              fontFamily: 'monospace',
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => tryLogin(password)}
-            style={{
-              width: '100%',
-              background: '#7C3AED',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '10px',
-              fontSize: '14px',
-              fontWeight: '500',
-              cursor: 'pointer',
-            }}
-          >
-            Enter
-          </button>
-        </div>
+        Checking access…
       </div>
     )
   }
