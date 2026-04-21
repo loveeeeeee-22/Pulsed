@@ -82,6 +82,16 @@ body {
   outline-offset: 2px;
 }
 
+@keyframes pj-inline-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pj-inline-spin {
+  animation: pj-inline-spin 0.65s linear infinite;
+}
+
 /* Inputs */
 input, select, textarea {
   background: var(--bg3);

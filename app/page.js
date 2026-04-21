@@ -8,6 +8,10 @@ import { getStrategiesForUser } from '@/lib/getStrategiesForUser'
 import { compareTradesChronoAsc } from '@/lib/tradeSort'
 import { useTheme } from '@/lib/ThemeContext'
 import NewTradeToast from '@/components/NewTradeToast'
+import AccountCashTransactionModal from '@/components/AccountCashTransactionModal'
+import BriefToast from '@/components/BriefToast'
+import { getAccountCashTransactionsForUser } from '@/lib/getAccountCashTransactionsForUser'
+import { signedCashDelta } from '@/lib/accountCashAmount'
 import Link from 'next/link'
 
 function formatDateTick(dateStr) {
@@ -198,8 +202,12 @@ export default function Dashboard() {
   const [strategyFilter, setStrategyFilter] = useState('all')
   const [dismissedReviewedBannerForKey, setDismissedReviewedBannerForKey] = useState('')
   const [toastTrade, setToastTrade] = useState(null)
+  const [cashTxns, setCashTxns] = useState([])
+  const [cashModalKind, setCashModalKind] = useState(null)
+  const [briefToast, setBriefToast] = useState(null)
 
   const dismissToast = useCallback(() => setToastTrade(null), [])
+  const dismissBriefToast = useCallback(() => setBriefToast(null), [])
 
   useEffect(() => {
     if (!sessionUser?.id) setToastTrade(null)
@@ -241,12 +249,18 @@ export default function Dashboard() {
     fetchAccounts()
     fetchTrades()
     fetchJournalEntries()
+    fetchCashTransactions()
     fetchDashProfile()
     ;(async () => {
       const list = await getStrategiesForUser({ select: 'id, name' })
       setStrategies(Array.isArray(list) ? list : [])
     })()
   }, [sessionUser?.id])
+
+  async function fetchCashTransactions() {
+    const rows = await getAccountCashTransactionsForUser()
+    setCashTxns(Array.isArray(rows) ? rows : [])
+  }
 
   useEffect(() => {
     if (!sessionUser?.id) return undefined
@@ -360,6 +374,68 @@ export default function Dashboard() {
     return `${latestStamp}:${latestId}`
   }, [trades])
 
+  const timeCutStr = useMemo(() => {
+    if (timeRange === 'all') return null
+    const nowD = new Date()
+    const cutoff = new Date(nowD)
+    if (timeRange === 'week') cutoff.setDate(cutoff.getDate() - 7)
+    if (timeRange === 'month') cutoff.setMonth(cutoff.getMonth() - 1)
+    return cutoff.toISOString().slice(0, 10)
+  }, [timeRange])
+
+  const cashNetByAccount = useMemo(() => {
+    const m = {}
+    for (const c of cashTxns) {
+      m[c.account_id] = (m[c.account_id] || 0) + signedCashDelta(c)
+    }
+    return m
+  }, [cashTxns])
+
+  const cashNetForBalanceHeadline = useMemo(() => {
+    if (selectedAccount === 'all') return 0
+    let list = cashTxns.filter((c) => c.account_id === selectedAccount)
+    if (timeCutStr) list = list.filter((c) => c.occurred_on >= timeCutStr)
+    return list.reduce((s, c) => s + signedCashDelta(c), 0)
+  }, [cashTxns, selectedAccount, timeCutStr])
+
+  const accountBalanceSeries = useMemo(() => {
+    const acct = accounts.find((a) => a.id === selectedAccount)
+    const base = parseFloat(acct?.balance || 0)
+    if (selectedAccount === 'all') return []
+    const tr = trades
+      .filter((t) => t.account_id === selectedAccount)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+    const cashRows = cashTxns.filter((c) => c.account_id === selectedAccount)
+    const tradeEvents = tr.map((t) => ({
+      sortKey: `${t.date || ''}\t${t.entry_time || ''}\ttrade\t${t.id}`,
+      date: t.date?.slice(0, 10) || '',
+      delta: parseFloat(t.net_pnl || 0),
+    }))
+    const cashEvents = cashRows.map((c) => ({
+      sortKey: `${c.occurred_on}\t${c.created_at || ''}\tcash\t${c.id}`,
+      date: c.occurred_on,
+      delta: signedCashDelta(c),
+    }))
+    const ev = [...tradeEvents, ...cashEvents].sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+    let running = base
+    return ev.map((e) => {
+      running += e.delta
+      return { date: e.date, balance: running }
+    })
+  }, [selectedAccount, accounts, trades, cashTxns])
+
+  const recentCashForAccount = useMemo(() => {
+    if (selectedAccount === 'all') return []
+    return cashTxns
+      .filter((c) => c.account_id === selectedAccount)
+      .sort((a, b) => {
+        const d = String(b.occurred_on || '').localeCompare(String(a.occurred_on || ''))
+        if (d !== 0) return d
+        return String(b.created_at || '').localeCompare(String(a.created_at || ''))
+      })
+      .slice(0, 20)
+  }, [cashTxns, selectedAccount])
+
   useEffect(() => {
     if (typeof window === 'undefined') return
     const stored = window.localStorage.getItem('dashboardReviewedBannerDismissedFor')
@@ -471,21 +547,7 @@ export default function Dashboard() {
 
   const selectedAcctObj = accounts.find(a => a.id === selectedAccount)
   const accountBalance = selectedAcctObj?.balance || 0
-  const currentBalance = parseFloat(accountBalance) + totalPnl
-  const selectedAccountTrades = selectedAccount === 'all'
-    ? []
-    : trades
-      .filter(t => t.account_id === selectedAccount)
-      .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
-
-  let runningBalance = parseFloat(selectedAcctObj?.balance || 0)
-  const accountBalanceSeries = selectedAccountTrades.map(t => {
-    runningBalance += parseFloat(t.net_pnl || 0)
-    return {
-      date: t.date?.slice(0, 10) || '',
-      balance: runningBalance,
-    }
-  })
+  const currentBalance = parseFloat(accountBalance) + totalPnl + cashNetForBalanceHeadline
   const balanceChartPoints = accountBalanceSeries.map(p => p.balance)
   const balW = 960
   const balH = 220
@@ -1454,18 +1516,58 @@ export default function Dashboard() {
 
         {/* Account Balance */}
         <div style={{ marginTop: '16px', background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-            <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 200px', minWidth: 0 }}>
               <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text)' }}>Account Balance</div>
               <div style={{ marginTop: '4px', fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)' }}>
                 {selectedAccount === 'all' ? 'Select a specific account to view balance progression.' : `${selectedAcctObj?.name || 'Selected account'} balance over time`}
               </div>
             </div>
-            {selectedAccount !== 'all' && (
-              <div style={{ fontSize: '24px', fontFamily: 'monospace', fontWeight: '700', color: 'var(--text)' }}>
-                ${currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
-            )}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px' }}>
+              {accounts.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    onClick={() => setCashModalKind('income')}
+                    style={{
+                      borderRadius: '8px',
+                      border: '1px solid rgba(34,197,94,0.5)',
+                      background: 'rgba(34,197,94,0.12)',
+                      color: '#4ade80',
+                      padding: '8px 14px',
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Add income
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCashModalKind('expense')}
+                    style={{
+                      borderRadius: '8px',
+                      border: '1px solid rgba(239,68,68,0.45)',
+                      background: 'rgba(239,68,68,0.1)',
+                      color: '#f87171',
+                      padding: '8px 14px',
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Add expense
+                  </button>
+                </div>
+              )}
+              {selectedAccount !== 'all' && (
+                <div style={{ fontSize: '24px', fontFamily: 'monospace', fontWeight: '700', color: 'var(--text)' }}>
+                  ${currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              )}
+            </div>
           </div>
 
           {selectedAccount === 'all' ? (
@@ -1474,7 +1576,7 @@ export default function Dashboard() {
                 {accounts.map(a => {
                   const acctTrades = trades.filter(t => t.account_id === a.id)
                   const acctPnl = acctTrades.reduce((s, t) => s + parseFloat(t.net_pnl || 0), 0)
-                  const bal = parseFloat(a.balance || 0) + acctPnl
+                  const bal = parseFloat(a.balance || 0) + acctPnl + (cashNetByAccount[a.id] || 0)
                   return (
                     <div key={a.id} style={{ padding: '10px 12px', background: 'var(--bg3)', borderRadius: '8px', border: '1px solid var(--border)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
@@ -1532,9 +1634,49 @@ export default function Dashboard() {
             </div>
           ) : (
             <div style={{ padding: '14px', borderRadius: '8px', background: 'var(--bg3)', border: '1px solid var(--border)', fontSize: '12px', fontFamily: 'monospace', color: 'var(--text3)' }}>
-              Add at least 2 trades on this account to render the balance chart.
+              Add at least two trades or cash movements on this account to render the balance chart.
             </div>
           )}
+
+          {selectedAccount !== 'all' && recentCashForAccount.length > 0 ? (
+            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '10px' }}>
+                Income & expenses (recent)
+              </div>
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {recentCashForAccount.map((row) => {
+                  const signed = signedCashDelta(row)
+                  const isInc = row.kind === 'income'
+                  return (
+                    <li
+                      key={row.id}
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'baseline',
+                        justifyContent: 'space-between',
+                        gap: '8px',
+                        fontSize: '12px',
+                        fontFamily: 'monospace',
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        background: 'var(--bg3)',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <span style={{ color: 'var(--text2)' }}>
+                        {row.occurred_on} · <span style={{ color: 'var(--text)' }}>{row.category}</span>
+                        {row.notes ? <span style={{ color: 'var(--text3)' }}> — {row.notes}</span> : null}
+                      </span>
+                      <span style={{ fontWeight: 700, color: isInc ? '#22C55E' : '#EF4444' }}>
+                        {signed >= 0 ? '+' : ''}${signed.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -1737,6 +1879,24 @@ export default function Dashboard() {
       )}
 
       <NewTradeToast trade={toastTrade} onClose={dismissToast} />
+
+      <AccountCashTransactionModal
+        kind={cashModalKind || 'income'}
+        open={cashModalKind != null}
+        onClose={() => setCashModalKind(null)}
+        accounts={accounts}
+        defaultAccountId={selectedAccount !== 'all' ? selectedAccount : ''}
+        accent={accent}
+        onSaved={async (row) => {
+          await fetchCashTransactions()
+          const label = row?.kind === 'expense' ? 'Expense' : 'Income'
+          setBriefToast({ message: `${label} saved.`, variant: 'success' })
+        }}
+      />
+
+      {briefToast ? (
+        <BriefToast message={briefToast.message} variant={briefToast.variant} onClose={dismissBriefToast} />
+      ) : null}
     </div>
   )
 }
