@@ -1,59 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 const FREE_ACCOUNT_LIMIT = 5
 
 const ACCOUNT_COLORS = ['#7C3AED', '#2563EB', '#22C55E', '#F59E0B', '#EF4444', '#14B8A6', '#EC4899', '#64748B']
 const CURRENCIES = ['USD', 'GBP', 'EUR', 'ZAR', 'NGN', 'GHS']
-
-const BROKER_GROUPS = [
-  {
-    label: 'Futures Brokers',
-    options: [
-      'Apex Trader Funding (funded)',
-      'AMP Futures',
-      'E8 Funding (funded)',
-      'Earn2Trade (funded)',
-      'FTMO Futures (funded)',
-      'FundedNext (funded)',
-      'My Funded Futures (funded)',
-      'NinjaTrader Brokerage',
-      'Optimus Futures',
-      'Rithmic / R Trader',
-      'TopStep (funded)',
-      'Tradovate',
-    ],
-  },
-  {
-    label: 'Forex Brokers',
-    options: [
-      'E8 Funding (funded)',
-      'Exness',
-      'Forex.com',
-      'FP Markets',
-      'FTMO (funded)',
-      'IC Markets',
-      'OANDA',
-      'Pepperstone',
-      'The5%ers (funded)',
-      'XM',
-    ],
-  },
-  {
-    label: 'Crypto',
-    options: ['Binance', 'Coinbase', 'Kraken', 'Bybit', 'OKX'],
-  },
-  {
-    label: 'Stocks/Options',
-    options: ['Interactive Brokers', 'TD Ameritrade / thinkorswim', 'Charles Schwab', 'Webull', 'Tastytrade'],
-  },
-  {
-    label: 'Other',
-    options: ['Other'],
-  },
-]
 
 const inputStyle = {
   width: '100%',
@@ -84,7 +37,6 @@ const emptyModal = {
   marketType: 'futures',
   environment: 'live',
   broker: '',
-  brokerOther: '',
   currency: 'USD',
   color: '#7C3AED',
 }
@@ -102,17 +54,7 @@ export default function AccountsSettingsSection() {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
-  const [brokerSearch, setBrokerSearch] = useState('')
   const [accent, setAccent] = useState('#7C3AED')
-
-  const filteredBrokerGroups = useMemo(() => {
-    const query = brokerSearch.trim().toLowerCase()
-    if (!query) return BROKER_GROUPS
-    return BROKER_GROUPS.map(group => ({
-      ...group,
-      options: group.options.filter(opt => opt.toLowerCase().includes(query)),
-    })).filter(group => group.options.length > 0)
-  }, [brokerSearch])
 
   const loadAccounts = useCallback(async () => {
     const {
@@ -180,7 +122,6 @@ export default function AccountsSettingsSection() {
   function openModal() {
     if (accounts.length >= FREE_ACCOUNT_LIMIT) return
     setForm({ ...emptyModal, color: accent || '#7C3AED' })
-    setBrokerSearch('')
     setSaveError('')
     setModalOpen(true)
   }
@@ -197,7 +138,7 @@ export default function AccountsSettingsSection() {
 
     const name = form.name.trim()
     const bal = parseFloat(String(form.balance).replace(/,/g, ''))
-    const broker = form.broker === 'Other' ? form.brokerOther.trim() : form.broker.trim()
+    const broker = form.broker.trim()
     if (!name) {
       setSaveError('Please enter an account name.')
       return
@@ -207,7 +148,7 @@ export default function AccountsSettingsSection() {
       return
     }
     if (!broker) {
-      setSaveError('Please select a broker.')
+      setSaveError('Please enter a broker name.')
       return
     }
     if (accounts.length >= FREE_ACCOUNT_LIMIT) {
@@ -648,50 +589,22 @@ export default function AccountsSettingsSection() {
               </div>
 
               <div>
-                <label style={labelStyle} htmlFor="broker-search">
-                  Broker
+                <label style={labelStyle} htmlFor="account-broker-name">
+                  Broker name
                 </label>
                 <input
-                  id="broker-search"
-                  name="search"
-                  type="search"
-                  autoComplete="off"
-                  style={{ ...inputStyle, marginBottom: '8px' }}
-                  value={brokerSearch}
-                  onChange={e => setBrokerSearch(e.target.value)}
-                  placeholder="Search broker list..."
-                />
-                <select
-                  id="account-broker"
-                  name="broker"
-                  autoComplete="off"
-                  style={{ ...inputStyle, cursor: 'pointer' }}
+                  id="account-broker-name"
+                  name="broker-name"
+                  type="text"
+                  autoComplete="organization"
+                  style={inputStyle}
                   value={form.broker}
                   onChange={e => setForm(f => ({ ...f, broker: e.target.value }))}
-                >
-                  <option value="">Select a broker</option>
-                  {filteredBrokerGroups.map(group => (
-                    <optgroup key={group.label} label={group.label}>
-                      {group.options.map(option => (
-                        <option key={`${group.label}-${option}`} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                {form.broker === 'Other' ? (
-                  <input
-                    id="broker-other"
-                    name="broker-other"
-                    type="text"
-                    autoComplete="off"
-                    style={{ ...inputStyle, marginTop: '8px' }}
-                    value={form.brokerOther}
-                    onChange={e => setForm(f => ({ ...f, brokerOther: e.target.value }))}
-                    placeholder="Enter broker name"
-                  />
-                ) : null}
+                  placeholder="e.g. who clears your trades (label only, not connected)"
+                />
+                <p style={{ fontSize: '11px', color: 'var(--text3)', margin: '6px 0 0' }}>
+                  Free text for your records. Pulsed does not connect or sync to your broker.
+                </p>
               </div>
 
               <div>

@@ -1,10 +1,52 @@
 'use client'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import { useTheme } from '@/lib/ThemeContext'
 
 export default function Sidebar({ isExpanded, onToggleExpand }) {
   const pathname = usePathname()
+  const router = useRouter()
+  const { theme, toggleTheme } = useTheme()
   const accent = '#7C3AED'
+
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  const [userEmail, setUserEmail] = useState('')
+  const [userInitials, setUserInitials] = useState('LO')
+
+  useEffect(() => {
+    async function getUser() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        setUserEmail(user.email ?? '')
+        const email = user.email
+        if (email) {
+          const parts = email
+            .split('@')[0]
+            .split(/[._-]/)
+          const initials = parts.length > 1
+            ? (parts[0][0] + parts[1][0])
+              .toUpperCase()
+            : email.slice(0, 2).toUpperCase()
+          setUserInitials(initials)
+        }
+      }
+    }
+    getUser()
+  }, [])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (!e.target.closest('.user-menu-wrap')) {
+        setShowUserMenu(false)
+      }
+    }
+    if (showUserMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showUserMenu])
 
   const links = [
     {
@@ -90,18 +132,18 @@ export default function Sidebar({ isExpanded, onToggleExpand }) {
           onClick={onToggleExpand}
           title={isExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
           style={{
-          border: 'none',
-          cursor: 'pointer',
-          width: '32px',
-          height: '32px',
-          background: accent,
-          borderRadius: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          transition: 'background 0.3s',
-        }}>
+            border: 'none',
+            cursor: 'pointer',
+            width: '32px',
+            height: '32px',
+            background: accent,
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            transition: 'background 0.3s',
+          }}>
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
             <path d="M9 15.5S2 11 2 6.5A4.5 4.5 0 0 1 9 4.18 4.5 4.5 0 0 1 16 6.5C16 11 9 15.5 9 15.5Z" fill="white"/>
           </svg>
@@ -166,23 +208,166 @@ export default function Sidebar({ isExpanded, onToggleExpand }) {
         width: '100%',
       }}>
 
-        {/* Avatar */}
-        <div style={{
-          width: '28px',
-          height: '28px',
-          borderRadius: '50%',
-          background: accent,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '10px',
-          fontWeight: '600',
-          color: '#fff',
-          cursor: 'pointer',
-          fontFamily: 'monospace',
-          transition: 'background 0.3s',
-        }}>
-          LO
+        <div className="user-menu-wrap" style={{ position: 'relative' }}>
+
+          {showUserMenu && (
+            <div style={{
+              position: 'fixed',
+              bottom: '60px',
+              left: '64px',
+              background: '#1A1A24',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '12px',
+              padding: '6px',
+              zIndex: 200,
+              minWidth: '220px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            }}>
+
+              <div style={{
+                padding: '10px 12px 12px',
+                borderBottom: '1px solid rgba(255,255,255,0.07)',
+                marginBottom: '4px',
+              }}>
+                <div style={{
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  color: '#F0EEF8',
+                  marginBottom: '2px',
+                }}>
+                  My Account
+                </div>
+                <div style={{
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  color: '#55536A',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {userEmail}
+                </div>
+              </div>
+
+              {[
+                {
+                  label: 'Profile & Settings',
+                  icon: '⚙',
+                  action: () => {
+                    router.push('/settings')
+                    setShowUserMenu(false)
+                  }
+                },
+                {
+                  label: theme === 'dark'
+                    ? 'Switch to Light Mode'
+                    : 'Switch to Dark Mode',
+                  icon: theme === 'dark' ? '☀' : '🌙',
+                  action: () => {
+                    toggleTheme()
+                    setShowUserMenu(false)
+                  }
+                },
+              ].map((item, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={item.action}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '9px 12px',
+                    borderRadius: '7px',
+                    border: 'none',
+                    background: 'none',
+                    color: '#9896A8',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.1s',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+                    e.currentTarget.style.color = '#F0EEF8'
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = 'none'
+                    e.currentTarget.style.color = '#9896A8'
+                  }}
+                >
+                  <span style={{ fontSize: '14px' }}>
+                    {item.icon}
+                  </span>
+                  {item.label}
+                </button>
+              ))}
+
+              <div style={{
+                height: '1px',
+                background: 'rgba(255,255,255,0.07)',
+                margin: '4px 0',
+              }} />
+
+              <button
+                type="button"
+                onClick={async () => {
+                  await supabase.auth.signOut()
+                  router.push('/auth')
+                  setShowUserMenu(false)
+                }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  padding: '9px 12px',
+                  borderRadius: '7px',
+                  border: 'none',
+                  background: 'none',
+                  color: '#EF4444',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.1s',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'rgba(239,68,68,0.08)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'none'
+                }}
+              >
+                <span style={{ fontSize: '14px' }}>→</span>
+                Sign out
+              </button>
+            </div>
+          )}
+
+          <div
+            onClick={() => setShowUserMenu(!showUserMenu)}
+            style={{
+              width: '28px',
+              height: '28px',
+              borderRadius: '50%',
+              background: accent,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '10px',
+              fontWeight: '600',
+              color: '#fff',
+              cursor: 'pointer',
+              fontFamily: 'monospace',
+              border: showUserMenu
+                ? '2px solid rgba(255,255,255,0.3)'
+                : '2px solid transparent',
+              transition: 'border 0.15s',
+            }}
+          >
+            {userInitials}
+          </div>
         </div>
       </div>
     </aside>

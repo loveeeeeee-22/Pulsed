@@ -127,10 +127,10 @@ export default function AccountDeletionSection() {
   }
 
   return (
-    <div style={{ marginTop: '16px', maxWidth: '420px' }}>
+    <div style={{ marginTop: '0', maxWidth: '420px' }}>
       <p style={{ fontSize: '13px', color: 'var(--text3)', lineHeight: 1.55, marginBottom: '16px' }}>
-        Permanently delete your login, profile, trading data, broker connections, and journal notes. This cannot be undone.
-        The server needs <span style={{ fontFamily: 'monospace' }}>SUPABASE_SERVICE_ROLE_KEY</span> (same as broker sync APIs).
+        This removes your login, profile, trades, accounts, and journal notes. The server must have{' '}
+        <span style={{ fontFamily: 'monospace' }}>SUPABASE_SERVICE_ROLE_KEY</span> configured for account deletion.
       </p>
       <form onSubmit={handleDeleteAccount} style={{ display: 'grid', gap: '12px' }}>
         {deleteMessage.text && (

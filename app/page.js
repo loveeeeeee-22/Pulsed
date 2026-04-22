@@ -3,16 +3,46 @@ import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { getAccountsForUser } from '@/lib/getAccountsForUser'
 import { getTradesForUser } from '@/lib/getTradesForUser'
-import { countTradesNeedingReview, isTradeReviewed } from '@/lib/tradeReviewStatus'
-import { getStrategiesForUser } from '@/lib/getStrategiesForUser'
+import { countTradesNeedingReview } from '@/lib/tradeReviewStatus'
 import { compareTradesChronoAsc } from '@/lib/tradeSort'
-import { useTheme } from '@/lib/ThemeContext'
 import NewTradeToast from '@/components/NewTradeToast'
 import AccountCashTransactionModal from '@/components/AccountCashTransactionModal'
 import BriefToast from '@/components/BriefToast'
 import { getAccountCashTransactionsForUser } from '@/lib/getAccountCashTransactionsForUser'
 import { signedCashDelta } from '@/lib/accountCashAmount'
 import Link from 'next/link'
+
+const LS_LAST_ACCOUNT = 'pulsed_last_account'
+const ACCENT_PICKER_COLORS = ['#7C3AED', '#2563EB', '#22C55E', '#F59E0B', '#EF4444', '#14B8A6', '#EC4899', '#64748B']
+
+function formatBrokerConnectionName(slug) {
+  if (!slug) return 'Broker'
+  return String(slug)
+    .split(/[_\s]+/)
+    .map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+    .join(' ')
+}
+
+function accountRowTypeLabel(a) {
+  if ((a.category || a.type) === 'prop') return 'Prop'
+  return (a.environment || 'live') === 'demo' ? 'Demo' : 'Live'
+}
+
+function formatMoneyBalance(v, currency = 'USD') {
+  if (v == null || v === '') return '—'
+  const n = Number(v)
+  if (!Number.isFinite(n)) return String(v)
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(n)
+  } catch {
+    return `${currency} ${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+  }
+}
 
 function formatDateTick(dateStr) {
   if (!dateStr) return ''
@@ -151,36 +181,20 @@ function computeStreaks(tradesChrono) {
   return { maxWin, maxLoss }
 }
 
-function exportTradesCsv(trades, filename = 'pulsed-trades-export.csv') {
-  const headers = ['date', 'symbol', 'direction', 'status', 'net_pnl', 'contracts', 'account_id', 'strategy_id', 'reviewed']
-  const rows = [headers.join(',')]
-  for (const t of trades) {
-    const r = headers.map((h) => {
-      let v = t[h]
-      if (h === 'reviewed') v = isTradeReviewed(t) ? 'yes' : 'no'
-      if (v == null) v = ''
-      const s = String(v).replace(/"/g, '""')
-      return `"${s}"`
-    })
-    rows.push(r.join(','))
-  }
-  const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
 export default function Dashboard() {
-  const { theme, toggleTheme } = useTheme()
   const [trades, setTrades] = useState([])
   const [accounts, setAccounts] = useState([])
-  const [selectedAccount, setSelectedAccount] = useState('all')
+  const [selectedAccount, setSelectedAccount] = useState('')
   const [loading, setLoading] = useState(true)
   const [currentDate, setCurrentDate] = useState(new Date())
-  const accent = '#7C3AED'
+  const [accent, setAccent] = useState('#7C3AED')
+  const [brokerConnections, setBrokerConnections] = useState([])
+  const [showAccountMenu, setShowAccountMenu] = useState(false)
+  const [showLogTradeMenu, setShowLogTradeMenu] = useState(false)
+  const [showAccentPicker, setShowAccentPicker] = useState(false)
+  const accountMenuRef = useRef(null)
+  const logTradeMenuRef = useRef(null)
+  const accentPickerRef = useRef(null)
   const [selectedDay, setSelectedDay] = useState(null)
   const [showNote, setShowNote] = useState(false)
   const [noteText, setNoteText] = useState('')
@@ -196,10 +210,6 @@ export default function Dashboard() {
   const sparkSvgRef = useRef(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [sessionUser, setSessionUser] = useState(null)
-  const [strategies, setStrategies] = useState([])
-  const [journalFilter, setJournalFilter] = useState('all')
-  const [timeRange, setTimeRange] = useState('all')
-  const [strategyFilter, setStrategyFilter] = useState('all')
   const [dismissedReviewedBannerForKey, setDismissedReviewedBannerForKey] = useState('')
   const [toastTrade, setToastTrade] = useState(null)
   const [cashTxns, setCashTxns] = useState([])
@@ -214,9 +224,31 @@ export default function Dashboard() {
   }, [sessionUser?.id])
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--accent', '#7C3AED')
-    localStorage.removeItem('accentColor')
+    if (typeof window === 'undefined') return
+    const raw = window.localStorage.getItem('accentColor')
+    if (raw && /^#[0-9A-Fa-f]{6}$/.test(raw.trim())) {
+      const hex = raw.trim()
+      setAccent(hex)
+      document.documentElement.style.setProperty('--accent', hex)
+    } else {
+      document.documentElement.style.setProperty('--accent', '#7C3AED')
+    }
   }, [])
+
+  useEffect(() => {
+    function onDocDown(e) {
+      const t = e.target
+      if (accountMenuRef.current?.contains(t)) return
+      if (logTradeMenuRef.current?.contains(t)) return
+      if (accentPickerRef.current?.contains(t)) return
+      setShowAccountMenu(false)
+      setShowLogTradeMenu(false)
+      setShowAccentPicker(false)
+    }
+    if (!showAccountMenu && !showLogTradeMenu && !showAccentPicker) return
+    document.addEventListener('mousedown', onDocDown)
+    return () => document.removeEventListener('mousedown', onDocDown)
+  }, [showAccountMenu, showLogTradeMenu, showAccentPicker])
 
   useEffect(() => {
     let cancelled = false
@@ -251,11 +283,53 @@ export default function Dashboard() {
     fetchJournalEntries()
     fetchCashTransactions()
     fetchDashProfile()
-    ;(async () => {
-      const list = await getStrategiesForUser({ select: 'id, name' })
-      setStrategies(Array.isArray(list) ? list : [])
-    })()
   }, [sessionUser?.id])
+
+  useEffect(() => {
+    if (!sessionUser?.id) {
+      setBrokerConnections([])
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const { data, error } = await supabase.from('broker_connections').select('*').eq('is_active', true)
+      if (cancelled) return
+      if (error) {
+        setBrokerConnections([])
+        return
+      }
+      setBrokerConnections(Array.isArray(data) ? data : [])
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [sessionUser?.id])
+
+  useEffect(() => {
+    if (!sessionUser?.id) return
+    if (!accounts.length) {
+      setSelectedAccount('')
+      return
+    }
+    if (selectedAccount && accounts.some((a) => a.id === selectedAccount)) return
+    ;(async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      const meta = user?.user_metadata?.last_account_id
+      if (meta && accounts.some((a) => a.id === meta)) {
+        setSelectedAccount(meta)
+        if (typeof window !== 'undefined') window.localStorage.setItem(LS_LAST_ACCOUNT, meta)
+        return
+      }
+      const saved = typeof window !== 'undefined' ? window.localStorage.getItem(LS_LAST_ACCOUNT) : null
+      if (saved && accounts.some((a) => a.id === saved)) {
+        setSelectedAccount(saved)
+        return
+      }
+      const first = accounts[0].id
+      setSelectedAccount(first)
+      if (typeof window !== 'undefined') window.localStorage.setItem(LS_LAST_ACCOUNT, first)
+    })()
+  }, [sessionUser?.id, accounts, selectedAccount])
 
   async function fetchCashTransactions() {
     const rows = await getAccountCashTransactionsForUser()
@@ -325,6 +399,24 @@ export default function Dashboard() {
     setDashUsername(data?.username?.trim() ? data.username.trim() : '')
   }
 
+  const hasBrokerSync = brokerConnections.length > 0
+
+  async function selectDashboardAccount(accountId) {
+    if (!accountId) return
+    setSelectedAccount(accountId)
+    setShowAccountMenu(false)
+    if (typeof window !== 'undefined') window.localStorage.setItem(LS_LAST_ACCOUNT, accountId)
+    await supabase.auth.updateUser({ data: { last_account_id: accountId } })
+  }
+
+  function applyAccentColor(hex) {
+    setAccent(hex)
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('accentColor', hex)
+      document.documentElement.style.setProperty('--accent', hex)
+    }
+  }
+
   async function saveNote(dateStr) {
     const uid = sessionUser?.id
     if (!uid) return
@@ -343,22 +435,9 @@ export default function Dashboard() {
   }
 
   const filtered = useMemo(() => {
-    let list = trades.filter(t => selectedAccount === 'all' || t.account_id === selectedAccount)
-    if (journalFilter === 'verified') list = list.filter(isTradeReviewed)
-    if (journalFilter === 'needs_review') list = list.filter(t => !isTradeReviewed(t))
-    if (strategyFilter !== 'all') {
-      list = list.filter(t => String(t.strategy_id || '') === strategyFilter)
-    }
-    if (timeRange !== 'all') {
-      const nowD = new Date()
-      const cutoff = new Date(nowD)
-      if (timeRange === 'week') cutoff.setDate(cutoff.getDate() - 7)
-      if (timeRange === 'month') cutoff.setMonth(cutoff.getMonth() - 1)
-      const cutStr = cutoff.toISOString().slice(0, 10)
-      list = list.filter(t => (t.date?.slice(0, 10) || '') >= cutStr)
-    }
-    return list
-  }, [trades, selectedAccount, journalFilter, strategyFilter, timeRange])
+    if (!selectedAccount) return []
+    return trades.filter(t => t.account_id === selectedAccount)
+  }, [trades, selectedAccount])
 
   const latestLoggedTradeKey = useMemo(() => {
     if (!trades.length) return 'none'
@@ -374,15 +453,6 @@ export default function Dashboard() {
     return `${latestStamp}:${latestId}`
   }, [trades])
 
-  const timeCutStr = useMemo(() => {
-    if (timeRange === 'all') return null
-    const nowD = new Date()
-    const cutoff = new Date(nowD)
-    if (timeRange === 'week') cutoff.setDate(cutoff.getDate() - 7)
-    if (timeRange === 'month') cutoff.setMonth(cutoff.getMonth() - 1)
-    return cutoff.toISOString().slice(0, 10)
-  }, [timeRange])
-
   const cashNetByAccount = useMemo(() => {
     const m = {}
     for (const c of cashTxns) {
@@ -392,16 +462,16 @@ export default function Dashboard() {
   }, [cashTxns])
 
   const cashNetForBalanceHeadline = useMemo(() => {
-    if (selectedAccount === 'all') return 0
-    let list = cashTxns.filter((c) => c.account_id === selectedAccount)
-    if (timeCutStr) list = list.filter((c) => c.occurred_on >= timeCutStr)
-    return list.reduce((s, c) => s + signedCashDelta(c), 0)
-  }, [cashTxns, selectedAccount, timeCutStr])
+    if (!selectedAccount) return 0
+    return cashTxns
+      .filter((c) => c.account_id === selectedAccount)
+      .reduce((s, c) => s + signedCashDelta(c), 0)
+  }, [cashTxns, selectedAccount])
 
   const accountBalanceSeries = useMemo(() => {
     const acct = accounts.find((a) => a.id === selectedAccount)
     const base = parseFloat(acct?.balance || 0)
-    if (selectedAccount === 'all') return []
+    if (!selectedAccount) return []
     const tr = trades
       .filter((t) => t.account_id === selectedAccount)
       .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
@@ -425,7 +495,7 @@ export default function Dashboard() {
   }, [selectedAccount, accounts, trades, cashTxns])
 
   const recentCashForAccount = useMemo(() => {
-    if (selectedAccount === 'all') return []
+    if (!selectedAccount) return []
     return cashTxns
       .filter((c) => c.account_id === selectedAccount)
       .sort((a, b) => {
@@ -799,18 +869,12 @@ export default function Dashboard() {
 
   const existingNote = journalEntries.find(e => e.date === selectedDay)
 
-  const pillBtn = (active) => ({
-    padding: '7px 14px',
-    borderRadius: '999px',
-    border: `1px solid ${active ? accent : 'var(--border-md)'}`,
-    background: active ? 'var(--accent-subtle)' : 'var(--bg3)',
-    color: active ? accent : 'var(--text2)',
-    fontFamily: 'monospace',
-    fontSize: '11px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  })
+  const accountBalanceForRow = (a) => {
+    const b = parseFloat(a.balance || 0)
+    const pnl = trades.filter((t) => t.account_id === a.id).reduce((s, t) => s + parseFloat(t.net_pnl || 0), 0)
+    const cash = cashNetByAccount[a.id] || 0
+    return b + pnl + cash
+  }
 
   const toolBtn = {
     padding: '8px 14px',
@@ -831,15 +895,14 @@ export default function Dashboard() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--page-bg)', color: 'var(--text)', fontFamily: 'sans-serif' }}>
 
-      {/* Page header — TradeSync-style title row */}
       <div
         style={{
           display: 'flex',
-          alignItems: 'flex-start',
+          alignItems: 'center',
           justifyContent: 'space-between',
           gap: '16px',
           flexWrap: 'wrap',
-          padding: '18px 24px 14px',
+          padding: '16px 24px 14px',
           borderBottom: '1px solid var(--border)',
           background: 'var(--card-bg)',
         }}
@@ -848,169 +911,351 @@ export default function Dashboard() {
           <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '4px' }}>
             Pulsed
           </div>
-          <h1 style={{ fontSize: '22px', fontWeight: 700, letterSpacing: '-0.02em', margin: 0, color: 'var(--text)' }}>Journaling Dashboard</h1>
+          <h1 style={{ fontSize: '22px', fontWeight: 700, letterSpacing: '-0.02em', margin: 0, color: 'var(--text)' }}>Dashboard</h1>
           <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text3)', fontWeight: 500 }}>
             {greeting}
             {dashUsername ? ` ${dashUsername}` : ''}
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              borderRadius: '999px',
-              background: 'rgba(34,197,94,0.12)',
-              border: '1px solid rgba(34,197,94,0.35)',
-              color: 'var(--green)',
-              fontSize: '11px',
-              fontFamily: 'monospace',
-              fontWeight: 600,
-            }}
-          >
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--green)' }} />
-            Session active
-          </span>
-          <button
-            type="button"
-            onClick={toggleTheme}
-            title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-            style={{
-              ...toolBtn,
-              width: '40px',
-              height: '36px',
-              padding: 0,
-              justifyContent: 'center',
-              borderRadius: '10px',
-            }}
-          >
-            {theme === 'dark' ? '☀' : '☾'}
-          </button>
-          <Link href="/settings" style={{ ...toolBtn, borderRadius: '10px', padding: '8px 12px' }}>
-            Settings
-          </Link>
-        </div>
-      </div>
 
-      {/* Filters + actions */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '14px',
-          flexWrap: 'wrap',
-          padding: '12px 24px',
-          borderBottom: '1px solid var(--border)',
-          background: 'var(--bg2)',
-        }}
-      >
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginRight: '4px' }}>Scope</span>
-          {[
-            { id: 'all', label: 'All trades' },
-            { id: 'verified', label: 'Reviewed' },
-            { id: 'needs_review', label: 'Needs review' },
-          ].map((p) => (
-            <button key={p.id} type="button" onClick={() => setJournalFilter(p.id)} style={pillBtn(journalFilter === p.id)}>
-              {p.label}
-            </button>
-          ))}
-          <span style={{ width: '1px', height: '20px', background: 'var(--border-md)', margin: '0 4px' }} />
-          {[
-            { id: 'all', label: 'All time' },
-            { id: 'month', label: '30d' },
-            { id: 'week', label: '7d' },
-          ].map((p) => (
-            <button key={p.id} type="button" onClick={() => setTimeRange(p.id)} style={pillBtn(timeRange === p.id)}>
-              {p.label}
-            </button>
-          ))}
-          <select
-            id="dashboard-account"
-            name="dashboard-account"
-            value={selectedAccount}
-            onChange={(e) => setSelectedAccount(e.target.value)}
-            autoComplete="off"
-            style={{
-              marginLeft: '6px',
-              maxWidth: '160px',
-              background: 'var(--bg3)',
-              border: '1px solid var(--border-md)',
-              borderRadius: '999px',
-              color: 'var(--text)',
-              fontFamily: 'monospace',
-              fontSize: '11px',
-              padding: '6px 28px 6px 12px',
-              cursor: 'pointer',
-            }}
-          >
-            <option value="all">All accounts</option>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-          <select
-            id="dashboard-strategy"
-            name="dashboard-strategy"
-            value={strategyFilter}
-            onChange={(e) => setStrategyFilter(e.target.value)}
-            autoComplete="off"
-            style={{
-              maxWidth: '150px',
-              background: 'var(--bg3)',
-              border: '1px solid var(--border-md)',
-              borderRadius: '999px',
-              color: 'var(--text)',
-              fontFamily: 'monospace',
-              fontSize: '11px',
-              padding: '6px 28px 6px 12px',
-              cursor: 'pointer',
-            }}
-          >
-            <option value="all">All strategies</option>
-            {strategies.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-          <button type="button" onClick={() => exportTradesCsv(filtered)} style={toolBtn}>
-            Export CSV
-          </button>
-          <Link
-            href="/new-trade"
-            style={{
-              ...toolBtn,
-              background: accent,
-              color: '#fff',
-              borderColor: accent,
-              boxShadow: `0 8px 22px ${accent}55`,
-              fontWeight: 700,
-            }}
-          >
-            + Log trade
-          </Link>
-          <Link href="/settings/brokers" style={toolBtn}>
-            Sync
-          </Link>
-          <Link
-            href="/journal"
-            style={{
-              ...toolBtn,
-              background: accent,
-              color: '#fff',
-              borderColor: accent,
-            }}
-          >
-            + Journal
-          </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginLeft: 'auto' }}>
+          {accounts.length === 0 ? (
+            <Link
+              href="/settings?section=accounts"
+              style={{ ...toolBtn, borderRadius: '999px' }}
+            >
+              + Add account
+            </Link>
+          ) : (
+            <div ref={accountMenuRef} style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAccountMenu((v) => !v)
+                  setShowLogTradeMenu(false)
+                  setShowAccentPicker(false)
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '7px 12px 7px 10px',
+                  borderRadius: '999px',
+                  border: '1px solid var(--border-md)',
+                  background: 'var(--bg3)',
+                  color: 'var(--text)',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  maxWidth: 'min(100vw - 32px, 280px)',
+                }}
+                aria-haspopup="listbox"
+                aria-expanded={showAccountMenu}
+              >
+                <span
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    flexShrink: 0,
+                    background: selectedAcctObj?.color || accent,
+                    boxShadow: '0 0 0 1px rgba(255,255,255,0.2)',
+                  }}
+                />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selectedAcctObj?.name || 'Account'}
+                </span>
+                <span style={{ color: 'var(--text3)', fontSize: '10px', marginLeft: '2px' }}>▾</span>
+              </button>
+              {showAccountMenu && (
+                <div
+                  role="listbox"
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 'calc(100% + 6px)',
+                    minWidth: '280px',
+                    maxWidth: 'min(100vw - 24px, 360px)',
+                    zIndex: 200,
+                    borderRadius: '12px',
+                    border: '1px solid var(--border)',
+                    background: 'var(--card-bg)',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.45)',
+                    padding: '6px',
+                  }}
+                >
+                  {accounts.map((a) => {
+                    const selected = a.id === selectedAccount
+                    return (
+                      <button
+                        key={a.id}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        onClick={() => selectDashboardAccount(a.id)}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          padding: '10px 10px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: selected ? 'var(--accent-subtle)' : 'transparent',
+                          color: 'var(--text)',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            flexShrink: 0,
+                            background: a.color || '#7C3AED',
+                          }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', marginTop: '3px' }}>
+                            <span
+                              style={{
+                                fontSize: '9px',
+                                fontFamily: 'monospace',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                                color: 'var(--text3)',
+                                background: 'var(--bg3)',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                              }}
+                            >
+                              {accountRowTypeLabel(a)}
+                            </span>
+                            <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text2)' }}>
+                              {formatMoneyBalance(accountBalanceForRow(a), a.currency || 'USD')}
+                            </span>
+                          </div>
+                        </div>
+                        {selected ? <span style={{ color: accent, fontSize: '14px' }}>✓</span> : <span style={{ width: 14 }} />}
+                      </button>
+                    )
+                  })}
+                  <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+                  <Link
+                    href="/settings?section=accounts"
+                    onClick={() => setShowAccountMenu(false)}
+                    style={{
+                      display: 'block',
+                      padding: '9px 10px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      color: accent,
+                      textDecoration: 'none',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    + Add account
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+
+          {hasBrokerSync ? (
+            <div ref={logTradeMenuRef} style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLogTradeMenu((v) => !v)
+                  setShowAccountMenu(false)
+                  setShowAccentPicker(false)
+                }}
+                style={{
+                  background: accent,
+                  color: '#fff',
+                  borderRadius: '8px',
+                  padding: '8px 16px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                + Log Trade
+                <span style={{ fontSize: '10px', opacity: 0.9 }}>▾</span>
+              </button>
+              {showLogTradeMenu && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 'calc(100% + 6px)',
+                    zIndex: 200,
+                    minWidth: '260px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border)',
+                    background: 'var(--card-bg)',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.45)',
+                    padding: '8px 6px',
+                  }}
+                >
+                  <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '4px 8px 6px' }}>
+                    Synced accounts
+                  </div>
+                  {brokerConnections.map((c) => {
+                    const ok = c.sync_status === 'healthy' || c.sync_status === 'syncing'
+                    return (
+                      <div
+                        key={c.id}
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '8px',
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            marginTop: '4px',
+                            flexShrink: 0,
+                            background: ok ? '#22C55E' : 'var(--text3)',
+                          }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text)' }}>{formatBrokerConnectionName(c.broker_name)}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '2px' }}>
+                            {c.account_name || c.account_id || 'Connected account'}
+                          </div>
+                          <div style={{ fontSize: '10px', color: 'var(--green)', marginTop: '4px', fontFamily: 'monospace' }}>Auto-syncing</div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  <div style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '8px 8px 4px' }}>
+                    Manual entry
+                  </div>
+                  <Link
+                    href="/new-trade"
+                    onClick={() => setShowLogTradeMenu(false)}
+                    style={{
+                      display: 'block',
+                      padding: '8px 10px',
+                      fontSize: '12px',
+                      color: 'var(--text)',
+                      textDecoration: 'none',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    + Log trade manually
+                  </Link>
+                  <div style={{ height: 1, background: 'var(--border)', margin: '6px 4px' }} />
+                  <Link
+                    href="/settings?section=accounts"
+                    onClick={() => setShowLogTradeMenu(false)}
+                    style={{
+                      display: 'block',
+                      padding: '8px 10px',
+                      fontSize: '12px',
+                      color: accent,
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    + Add new account
+                  </Link>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Link
+              href="/new-trade"
+              style={{
+                background: accent,
+                color: '#fff',
+                borderRadius: '8px',
+                padding: '8px 16px',
+                fontSize: '13px',
+                fontWeight: 500,
+                textDecoration: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              + Log Trade
+            </Link>
+          )}
+
+          <div ref={accentPickerRef} style={{ position: 'relative' }}>
+            <button
+              type="button"
+              title="Accent color"
+              onClick={() => {
+                setShowAccentPicker((v) => !v)
+                setShowAccountMenu(false)
+                setShowLogTradeMenu(false)
+              }}
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                border: '2px solid var(--border-md)',
+                background: accent,
+                cursor: 'pointer',
+                boxShadow: 'inset 0 0 0 2px rgba(255,255,255,0.15)',
+              }}
+            />
+            {showAccentPicker && (
+              <div
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: 'calc(100% + 6px)',
+                  zIndex: 200,
+                  display: 'flex',
+                  gap: '8px',
+                  flexWrap: 'wrap',
+                  padding: '10px',
+                  width: 180,
+                  borderRadius: '12px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--card-bg)',
+                  boxShadow: '0 12px 40px rgba(0,0,0,0.45)',
+                }}
+              >
+                {ACCENT_PICKER_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => {
+                      applyAccentColor(c)
+                      setShowAccentPicker(false)
+                    }}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      border: accent === c ? '2px solid #fff' : '1px solid var(--border-md)',
+                      background: c,
+                      cursor: 'pointer',
+                      boxShadow: accent === c ? `0 0 0 2px ${c}` : 'none',
+                    }}
+                    title={c}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1032,8 +1277,7 @@ export default function Dashboard() {
             }}
           >
             <span style={{ fontSize: '13px', fontFamily: 'monospace', color: 'var(--text)' }}>
-              <strong style={{ color: '#F59E0B' }}>{pendingReviewCount}</strong> trade{pendingReviewCount === 1 ? '' : 's'} left to review
-              {selectedAccount !== 'all' ? ' (current account filter)' : ''}. Open a trade review and click <strong>Mark as reviewed</strong> when you are done.
+              <strong style={{ color: '#F59E0B' }}>{pendingReviewCount}</strong> trade{pendingReviewCount === 1 ? '' : 's'} left to review for this account. Open a trade review and click <strong>Mark as reviewed</strong> when you are done.
             </span>
             <Link
               href="/trade-log"
@@ -1068,7 +1312,7 @@ export default function Dashboard() {
           >
             <span style={{ fontSize: '13px', fontFamily: 'monospace', color: 'var(--text)' }}>
               <strong style={{ color: '#22C55E' }}>All trades reviewed</strong>
-              {selectedAccount !== 'all' ? ' (current account filter)' : ''} — great work.
+              {selectedAcctObj ? ` on ${selectedAcctObj.name}` : ''} — great work.
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Link
@@ -1520,7 +1764,7 @@ export default function Dashboard() {
             <div style={{ flex: '1 1 200px', minWidth: 0 }}>
               <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text)' }}>Account Balance</div>
               <div style={{ marginTop: '4px', fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)' }}>
-                {selectedAccount === 'all' ? 'Select a specific account to view balance progression.' : `${selectedAcctObj?.name || 'Selected account'} balance over time`}
+                {!selectedAccount ? 'Add an account to view balance progression.' : `${selectedAcctObj?.name || 'Account'} balance over time`}
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px' }}>
@@ -1545,7 +1789,7 @@ export default function Dashboard() {
                   </button>
                 </div>
               )}
-              {selectedAccount !== 'all' && (
+              {selectedAccount && (
                 <div style={{ fontSize: '24px', fontFamily: 'monospace', fontWeight: '700', color: 'var(--text)' }}>
                   ${currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
@@ -1553,31 +1797,14 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {selectedAccount === 'all' ? (
-            accounts.length > 0 ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
-                {accounts.map(a => {
-                  const acctTrades = trades.filter(t => t.account_id === a.id)
-                  const acctPnl = acctTrades.reduce((s, t) => s + parseFloat(t.net_pnl || 0), 0)
-                  const bal = parseFloat(a.balance || 0) + acctPnl + (cashNetByAccount[a.id] || 0)
-                  return (
-                    <div key={a.id} style={{ padding: '10px 12px', background: 'var(--bg3)', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                        <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text)' }}>{a.name}</div>
-                        <div style={{ fontSize: '9px', fontFamily: 'monospace', color: 'var(--text3)', background: 'var(--bg4)', padding: '2px 6px', borderRadius: '4px' }}>{a.type}</div>
-                      </div>
-                      <div style={{ fontSize: '15px', fontFamily: 'monospace', fontWeight: '600', color: 'var(--text)' }}>
-                        ${bal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text3)', fontSize: '12px', fontFamily: 'monospace' }}>
-                No accounts yet. <Link href="/settings" style={{ color: accent }}>Add one</Link>
-              </div>
-            )
+          {!accounts.length ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text3)', fontSize: '12px', fontFamily: 'monospace' }}>
+              No accounts yet. <Link href="/settings?section=accounts" style={{ color: accent }}>Add one</Link>
+            </div>
+          ) : !selectedAccount ? (
+            <div style={{ padding: '14px', borderRadius: '8px', background: 'var(--bg3)', border: '1px solid var(--border)', fontSize: '12px', fontFamily: 'monospace', color: 'var(--text3)' }}>
+              Choose an account from the menu above to see your balance chart.
+            </div>
           ) : accountBalanceSeries.length > 1 ? (
             <div>
               <svg width="100%" height="260" viewBox={`0 0 ${balW} ${balH}`} preserveAspectRatio="none">
@@ -1621,7 +1848,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {selectedAccount !== 'all' && recentCashForAccount.length > 0 ? (
+          {selectedAccount && recentCashForAccount.length > 0 ? (
             <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--border)' }}>
               <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '10px' }}>
                 {'Withdrawals & cash activity (recent)'}
@@ -1872,7 +2099,7 @@ export default function Dashboard() {
         open={cashModalKind != null}
         onClose={() => setCashModalKind(null)}
         accounts={accounts}
-        defaultAccountId={selectedAccount !== 'all' ? selectedAccount : ''}
+        defaultAccountId={selectedAccount || ''}
         accent={accent}
         onSaved={async (row) => {
           await fetchCashTransactions()
