@@ -8,6 +8,7 @@ import { compareTradesChronoAsc } from '@/lib/tradeSort'
 import NewTradeToast from '@/components/NewTradeToast'
 import AccountCashTransactionModal from '@/components/AccountCashTransactionModal'
 import BriefToast from '@/components/BriefToast'
+import BrokerSyncModal from '@/components/BrokerSyncModal'
 import { getAccountCashTransactionsForUser } from '@/lib/getAccountCashTransactionsForUser'
 import { signedCashDelta } from '@/lib/accountCashAmount'
 import Link from 'next/link'
@@ -192,6 +193,7 @@ export default function Dashboard() {
   const [showAccountMenu, setShowAccountMenu] = useState(false)
   const [showLogTradeMenu, setShowLogTradeMenu] = useState(false)
   const [showAccentPicker, setShowAccentPicker] = useState(false)
+  const [showBrokerModal, setShowBrokerModal] = useState(false)
   const accountMenuRef = useRef(null)
   const logTradeMenuRef = useRef(null)
   const accentPickerRef = useRef(null)
@@ -285,25 +287,22 @@ export default function Dashboard() {
     fetchDashProfile()
   }, [sessionUser?.id])
 
-  useEffect(() => {
+  const loadBrokerConnections = useCallback(async () => {
     if (!sessionUser?.id) {
       setBrokerConnections([])
       return
     }
-    let cancelled = false
-    ;(async () => {
-      const { data, error } = await supabase.from('broker_connections').select('*').eq('is_active', true)
-      if (cancelled) return
-      if (error) {
-        setBrokerConnections([])
-        return
-      }
-      setBrokerConnections(Array.isArray(data) ? data : [])
-    })()
-    return () => {
-      cancelled = true
+    const { data, error } = await supabase.from('broker_connections').select('*').eq('is_active', true)
+    if (error) {
+      setBrokerConnections([])
+      return
     }
+    setBrokerConnections(Array.isArray(data) ? data : [])
   }, [sessionUser?.id])
+
+  useEffect(() => {
+    loadBrokerConnections()
+  }, [loadBrokerConnections])
 
   useEffect(() => {
     if (!sessionUser?.id) return
@@ -1157,6 +1156,28 @@ export default function Dashboard() {
                   >
                     + Log trade manually
                   </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowBrokerModal(true)
+                      setShowLogTradeMenu(false)
+                    }}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '8px 10px',
+                      fontSize: '12px',
+                      color: accent,
+                      fontWeight: 600,
+                      background: 'none',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Connect a broker
+                  </button>
                   <div style={{ height: 1, background: 'var(--border)', margin: '6px 4px' }} />
                   <Link
                     href="/settings?section=accounts"
@@ -1177,23 +1198,41 @@ export default function Dashboard() {
               )}
             </div>
           ) : (
-            <Link
-              href="/new-trade"
-              style={{
-                background: accent,
-                color: '#fff',
-                borderRadius: '8px',
-                padding: '8px 16px',
-                fontSize: '13px',
-                fontWeight: 500,
-                textDecoration: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              + Log Trade
-            </Link>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <Link
+                href="/new-trade"
+                style={{
+                  background: accent,
+                  color: '#fff',
+                  borderRadius: '8px',
+                  padding: '8px 16px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  textDecoration: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                + Log Trade
+              </Link>
+              <button
+                type="button"
+                onClick={() => setShowBrokerModal(true)}
+                style={{
+                  background: 'transparent',
+                  color: 'var(--text2)',
+                  borderRadius: '8px',
+                  padding: '8px 12px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  border: '1px solid var(--border-md)',
+                  cursor: 'pointer',
+                }}
+              >
+                Connect a broker
+              </button>
+            </div>
           )}
 
           <div ref={accentPickerRef} style={{ position: 'relative' }}>
@@ -2111,6 +2150,14 @@ export default function Dashboard() {
       {briefToast ? (
         <BriefToast message={briefToast.message} variant={briefToast.variant} onClose={dismissBriefToast} />
       ) : null}
+
+      <BrokerSyncModal
+        isOpen={showBrokerModal}
+        onClose={() => setShowBrokerModal(false)}
+        onSuccess={() => {
+          loadBrokerConnections()
+        }}
+      />
     </div>
   )
 }

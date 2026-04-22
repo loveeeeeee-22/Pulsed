@@ -11,6 +11,7 @@ import AccountsSettingsSection from '@/components/AccountsSettingsSection'
 import AppearanceSettingsSection from '@/components/AppearanceSettingsSection'
 import NotificationsSettingsSection from '@/components/NotificationsSettingsSection'
 import DataPrivacySettingsSection from '@/components/DataPrivacySettingsSection'
+import BrokerSyncModal from '@/components/BrokerSyncModal'
 
 const NAV_ORDER = [
   { key: 'profile', label: 'Profile' },
@@ -92,6 +93,7 @@ export default function SettingsPage() {
   )
   const [loggingOut, setLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState(null)
+  const [showBrokerModal, setShowBrokerModal] = useState(false)
 
   useEffect(() => {
     const lsAccent = typeof window !== 'undefined' ? window.localStorage.getItem('accentColor') : null
@@ -142,6 +144,24 @@ export default function SettingsPage() {
           <p style={{ marginTop: '8px', maxWidth: '640px', fontSize: '13px', color: 'var(--text3)' }}>
             Manage your profile, journal accounts, and preferences.
           </p>
+          <div style={{ marginTop: '14px' }}>
+            <button
+              type="button"
+              onClick={() => setShowBrokerModal(true)}
+              style={{
+                borderRadius: '10px',
+                border: '1px solid var(--accent)',
+                background: 'var(--accent-subtle)',
+                color: 'var(--accent)',
+                padding: '10px 18px',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Connect broker
+            </button>
+          </div>
         </header>
 
         <div
@@ -231,7 +251,7 @@ export default function SettingsPage() {
               </div>
             ) : selectedItem === 'accounts' ? (
               <div style={{ marginTop: '12px' }}>
-                <AccountsSettingsSection />
+                <AccountsSettingsSection onOpenBrokerSync={() => setShowBrokerModal(true)} />
               </div>
             ) : selectedItem === 'appearance' ? (
               <AppearanceSettingsSection />
@@ -251,6 +271,12 @@ export default function SettingsPage() {
           </section>
         </div>
       </div>
+
+      <BrokerSyncModal
+        isOpen={showBrokerModal}
+        onClose={() => setShowBrokerModal(false)}
+        onSuccess={() => setShowBrokerModal(false)}
+      />
     </div>
   )
 }

@@ -41,7 +41,7 @@ const emptyModal = {
   color: '#7C3AED',
 }
 
-export default function AccountsSettingsSection() {
+export default function AccountsSettingsSection({ onOpenBrokerSync }) {
   const [sessionUser, setSessionUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [accounts, setAccounts] = useState([])
@@ -265,6 +265,24 @@ export default function AccountsSettingsSection() {
         >
           Add account
         </button>
+        {typeof onOpenBrokerSync === 'function' && (
+          <button
+            type="button"
+            onClick={onOpenBrokerSync}
+            style={{
+              borderRadius: '10px',
+              border: '1px solid var(--border)',
+              background: 'var(--bg3)',
+              color: 'var(--text2)',
+              padding: '10px 18px',
+              fontSize: '13px',
+              fontFamily: 'monospace',
+              cursor: 'pointer',
+            }}
+          >
+            Connect broker
+          </button>
+        )}
       </div>
 
       {listLoading ? (
