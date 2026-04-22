@@ -150,10 +150,13 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
   const [tvHistory, setTvHistory] = useState('90d')
 
   const [saving, setSaving] = useState(false)
-  /** 0 = form, 1–3 = in progress, 4 = all sub-steps done + final copy */
+  /** 0 = form, 1–3 = in progress, 4 = all sub-steps done + final copy (Tradovate pending) */
   const [connStep, setConnStep] = useState(0)
   const [connectDone, setConnectDone] = useState(false)
   const [saveError, setSaveError] = useState('')
+  /** MT4/MT5 MetaApi: post-connect success (step 4) */
+  const [mtSuccess, setMtSuccess] = useState(false)
+  const [successProgress, setSuccessProgress] = useState(0)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -177,6 +180,8 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
     setConnStep(0)
     setConnectDone(false)
     setSaveError('')
+    setMtSuccess(false)
+    setSuccessProgress(0)
   }, [])
 
   useEffect(() => {
@@ -227,6 +232,19 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
     }, 3000)
   }, [])
 
+  useEffect(() => {
+    if (!mtSuccess) return
+    setSuccessProgress(0)
+    const start = Date.now()
+    const duration = 10_000
+    const t = setInterval(() => {
+      const p = Math.min(100, ((Date.now() - start) / duration) * 100)
+      setSuccessProgress(p)
+      if (p >= 100) clearInterval(t)
+    }, 100)
+    return () => clearInterval(t)
+  }, [mtSuccess])
+
   const handleConnectSubmit = async (e) => {
     e?.preventDefault?.()
     setSaveError('')
@@ -236,7 +254,49 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
         setSaveError('Please fill in server, account number, and investor password.')
         return
       }
-    } else if (platform === 'tradovate') {
+      setSaving(true)
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData?.session?.access_token
+      if (!accessToken) {
+        setSaveError('You must be signed in.')
+        setSaving(false)
+        return
+      }
+      try {
+        const res = await fetch('/api/metaapi/connect', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            login: mtLogin.trim(),
+            password: mtPassword,
+            server: mtServer.trim(),
+            platform,
+            environment: 'live',
+            historyRange: mtHistory,
+            pulsedAccountId: null,
+          }),
+        })
+        const result = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setSaveError(result.error || 'Connection failed')
+          setSaving(false)
+          return
+        }
+        onSuccess?.()
+        setSaving(false)
+        setMtSuccess(true)
+        setStep(4)
+      } catch {
+        setSaveError('Network error. Please try again.')
+        setSaving(false)
+      }
+      return
+    }
+
+    if (platform === 'tradovate') {
       if (!tvUser.trim() || !tvPassword.trim()) {
         setSaveError('Please enter your Tradovate email and password.')
         return
@@ -258,27 +318,12 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
     }
 
     const historyKey = platform === 'tradovate' ? tvHistory : mtHistory
-    let credentials
-    let brokerName
-    let environment
-
-    if (platform === 'mt5' || platform === 'mt4') {
-      brokerName = platform
-      environment = 'live'
-      credentials = {
-        server: mtServer.trim(),
-        login: mtLogin.trim(),
-        import_history: historyKey,
-        metaapi_intent: true,
-      }
-    } else {
-      brokerName = 'tradovate'
-      environment = tvEnv
-      credentials = {
-        username: tvUser.trim().toLowerCase(),
-        import_history: historyKey,
-        tradovate_intent: true,
-      }
+    const brokerName = 'tradovate'
+    const environment = tvEnv
+    const credentials = {
+      username: tvUser.trim().toLowerCase(),
+      import_history: historyKey,
+      tradovate_intent: true,
     }
 
     const { error: insErr } = await supabase.from('broker_connections').insert({
@@ -382,7 +427,7 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
                   Connect a broker
                 </h2>
                 <p style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text3)', margin: '2px 0 0' }}>
-                  Step {step} of 3
+                  Step {mtSuccess ? 4 : step} of {mtSuccess ? 4 : 3}
                 </p>
               </div>
             </div>
@@ -409,11 +454,11 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
         </div>
 
         {/* Step tracker */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '12px 16px', flexShrink: 0 }}>
-          {['Platform', 'Method', 'Connect'].map((label, i) => {
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '12px 16px', flexShrink: 0, flexWrap: 'wrap' }}>
+          {(mtSuccess ? ['Platform', 'Method', 'Connect', 'Done'] : ['Platform', 'Method', 'Connect']).map((label, i) => {
             const n = i + 1
-            const active = step === n
-            const done = step > n
+            const active = mtSuccess ? n === 4 : step === n
+            const done = mtSuccess ? n < 4 : step > n
             return (
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 {i > 0 ? (
@@ -680,7 +725,14 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
           )}
 
           {/* Step 3 — auto only */}
-          {step === 3 && isMt && connStep === 0 && !connectDone && (
+          {step >= 3 && isMt && saving && !mtSuccess && (
+            <div style={{ textAlign: 'center', padding: '32px 12px', animation: 'bsFade 0.25s ease-out' }}>
+              <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>Connecting…</div>
+              <p style={{ fontSize: '13px', color: 'var(--text3)', margin: 0 }}>Contacting MetaApi and your broker server</p>
+            </div>
+          )}
+
+          {step === 3 && isMt && connStep === 0 && !connectDone && !mtSuccess && !saving && (
             <form id="broker-form-mt" onSubmit={handleConnectSubmit} style={{ animation: 'bsFade 0.25s ease-out' }}>
               <h3 style={{ fontSize: '20px', fontWeight: 700, margin: '8px 0 6px', color: 'var(--text)' }}>Connect {platform === 'mt5' ? 'MT5' : 'MT4'}</h3>
               <p style={{ fontSize: '13px', color: 'var(--text3)', marginBottom: '16px' }}>Enter your MetaTrader login credentials</p>
@@ -895,8 +947,58 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
             </form>
           )}
 
-          {/* Connecting + done */}
-          {step === 3 && connStep > 0 && (
+          {mtSuccess && isMt && (
+            <div style={{ textAlign: 'center', padding: '16px 8px 8px', animation: 'bsFade 0.35s ease-out' }}>
+              <div
+                style={{
+                  width: '72px',
+                  height: '72px',
+                  borderRadius: '50%',
+                  margin: '0 auto 20px',
+                  background: `linear-gradient(145deg, ${SUCCESS}33, ${SUCCESS}18)`,
+                  border: `2px solid ${SUCCESS}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '36px',
+                  color: SUCCESS,
+                  boxShadow: `0 0 40px ${SUCCESS}33`,
+                }}
+              >
+                ✓
+              </div>
+              <h3 style={{ fontSize: '22px', fontWeight: 700, margin: '0 0 8px', color: 'var(--text)' }}>Connected successfully!</h3>
+              <p style={{ fontSize: '14px', color: 'var(--text3)', margin: '0 0 20px', lineHeight: 1.5 }}>
+                Your {platform === 'mt5' ? 'MT5' : 'MT4'} account is now syncing with Pulsed
+              </p>
+              <p style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '10px' }}>Importing your trade history…</p>
+              <div
+                style={{
+                  height: '8px',
+                  borderRadius: '999px',
+                  background: 'var(--bg3)',
+                  overflow: 'hidden',
+                  maxWidth: '360px',
+                  margin: '0 auto 16px',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${successProgress}%`,
+                    background: SUCCESS,
+                    borderRadius: '999px',
+                    transition: 'width 0.1s linear',
+                  }}
+                />
+              </div>
+              <p style={{ fontSize: '12px', color: 'var(--text3)', margin: 0 }}>Trades will appear in your journal shortly</p>
+            </div>
+          )}
+
+          {/* Tradovate pending animation */}
+          {step === 3 && isTv && connStep > 0 && (
             <div style={{ textAlign: 'center', padding: '12px 0 8px' }}>
               <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '20px' }}>
                 {connectDone ? 'Connection pending' : 'Connecting...'}
@@ -933,7 +1035,7 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
               </ol>
               {connectDone && (
                 <p style={{ fontSize: '13px', color: 'var(--text2)', lineHeight: 1.6, marginTop: '20px', maxWidth: '420px', margin: '20px auto 0' }}>
-                  Almost ready! Your MetaApi integration is being configured. You will receive an email when your account is ready to sync.
+                  Almost ready! Your Tradovate connection is being finalized. You will receive an email when your account is ready to sync.
                 </p>
               )}
             </div>
@@ -954,7 +1056,9 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
           }}
         >
           <div>
-            {step > 1 && !((step === 3 && connectDone) || (step === 3 && connStep > 0 && !connectDone)) && (
+            {step > 1 &&
+              !mtSuccess &&
+              !((step === 3 && connectDone) || (step === 3 && isTv && connStep > 0 && !connectDone)) && (
               <button
                 type="button"
                 onClick={() => {
@@ -1015,7 +1119,7 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
                 Continue
               </button>
             )}
-            {step === 3 && isMt && !connectDone && connStep === 0 && (
+            {step === 3 && isMt && !connectDone && connStep === 0 && !mtSuccess && (
               <button
                 type="submit"
                 form="broker-form-mt"
@@ -1053,7 +1157,46 @@ export default function BrokerSyncModal({ isOpen, onClose, onSuccess }) {
                 {saving ? 'Connecting...' : 'Connect & sync'}
               </button>
             )}
-            {(step === 3 && connectDone) && (
+            {mtSuccess && isMt && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    router.push('/')
+                    handleClose()
+                  }}
+                  style={{
+                    borderRadius: '10px',
+                    border: `1px solid ${accent}`,
+                    background: accent,
+                    color: '#fff',
+                    padding: '10px 18px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Go to dashboard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => reset()}
+                  style={{
+                    borderRadius: '10px',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg3)',
+                    color: 'var(--text2)',
+                    padding: '10px 18px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Connect another account
+                </button>
+              </>
+            )}
+            {step === 3 && connectDone && isTv && (
               <button
                 type="button"
                 onClick={handleClose}
