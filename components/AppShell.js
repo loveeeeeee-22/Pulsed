@@ -20,12 +20,11 @@ export default function AppShell({ children }) {
       {!hideSidebar && <Sidebar />}
       <main
         style={{
-          marginLeft: hideSidebar ? 0 : 'var(--sidebar-width, 56px)',
+          marginLeft: hideSidebar ? 0 : '56px',
           flex: 1,
           minHeight: '100vh',
           background: 'var(--page-bg)',
           color: 'var(--text)',
-          transition: 'margin-left 0.25s cubic-bezier(0.4,0,0.2,1)',
         }}
       >
         {children}
