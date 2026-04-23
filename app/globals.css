@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root {
+  --sidebar-width: 56px;
   --page-bg: #0A0A0F;
   --bg2: #111118;
   --bg3: #18181F;

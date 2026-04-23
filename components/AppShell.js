@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import AuthSessionRecovery from '@/components/AuthSessionRecovery'
@@ -8,38 +7,25 @@ import NavigationProgress from '@/components/NavigationProgress'
 
 export default function AppShell({ children }) {
   const pathname = usePathname()
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false)
-  const sidebarWidth = isSidebarExpanded ? 210 : 56
   const hideSidebar =
     pathname === '/landing' ||
     (typeof pathname === 'string' && pathname.startsWith('/auth')) ||
     (typeof pathname === 'string' && pathname.startsWith('/maintenance')) ||
     (typeof pathname === 'string' && pathname.startsWith('/admin'))
 
-  useEffect(() => {
-    if (pathname === '/subscription' || (pathname && pathname.startsWith('/settings'))) {
-      setIsSidebarExpanded(true)
-    }
-  }, [pathname])
-
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
       <NavigationProgress />
       <AuthSessionRecovery />
-      {!hideSidebar && (
-        <Sidebar
-          isExpanded={isSidebarExpanded}
-          onToggleExpand={() => setIsSidebarExpanded(prev => !prev)}
-        />
-      )}
+      {!hideSidebar && <Sidebar />}
       <main
         style={{
-          marginLeft: hideSidebar ? 0 : `${sidebarWidth}px`,
+          marginLeft: hideSidebar ? 0 : 'var(--sidebar-width, 56px)',
           flex: 1,
           minHeight: '100vh',
           background: 'var(--page-bg)',
           color: 'var(--text)',
-          transition: 'margin-left 0.2s ease',
+          transition: 'margin-left 0.25s cubic-bezier(0.4,0,0.2,1)',
         }}
       >
         {children}
